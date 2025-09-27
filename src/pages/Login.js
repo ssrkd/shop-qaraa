@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
-import logo from '../images/qaraa.png'
+import logo from '../images/logo.png'
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('')
