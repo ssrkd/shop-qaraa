@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import logo from '../images/qara.png'
@@ -9,7 +9,7 @@ export default function Login({ onLogin }) {
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showModal, setShowModal] = useState(false)
-  const [showPassword, setShowPassword] = useState(false) // для удержания пароля
+  const [showPassword, setShowPassword] = useState(false)
 
   const navigate = useNavigate()
 
@@ -58,15 +58,43 @@ export default function Login({ onLogin }) {
   }
 
   const styles = {
-    container: { width: '100%', maxWidth: '1200px', margin: '0 auto', padding: '20px', display: 'flex', justifyContent: 'center', alignItems: 'center' },
-    loginContainer: { backgroundColor: '#f9f9f9', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)', overflow: 'hidden', width: '100%', maxWidth: '450px' },
+    container: { 
+      width: '100%', 
+      minHeight: '100vh',
+      display: 'flex', 
+      justifyContent: 'center', 
+      alignItems: 'center',
+      position: 'relative',
+      overflow: 'hidden',
+      background: 'linear-gradient(135deg, #112e51 0%, #0b3d91 100%)'
+    },
+    pattern: { 
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+      opacity: 0.1,
+      zIndex: 0
+    },
+    loginContainer: { 
+      backgroundColor: '#f9f9f9', 
+      borderRadius: '12px', 
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)', 
+      overflow: 'hidden', 
+      width: '100%', 
+      maxWidth: '450px', 
+      position: 'relative',
+      zIndex: 1
+    },
     header: { backgroundColor: '#0b3d91', color: 'white', padding: '20px', textAlign: 'center', position: 'relative' },
     logoContainer: { marginBottom: '15px', display: 'flex', justifyContent: 'center', alignItems: 'center' },
     logoImage: { width: '100px', height: '100px', borderRadius: '50%', backgroundColor: 'white', padding: '5px', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.3)', objectFit: 'cover' },
     title: { fontSize: '22px', fontWeight: '600', marginBottom: '5px' },
     subtitle: { fontSize: '14px', opacity: '0.9' },
     systemStatus: { position: 'absolute', top: '15px', right: '15px', display: 'flex', alignItems: 'center' },
-    statusIndicator: { width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#2e8540', marginRight: '5px' },
+    statusIndicator: { width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#2e8540', marginRight: '5px', animation: 'blink 1.5s infinite' },
     statusText: { fontSize: '12px', color: 'rgba(255, 255, 255, 0.8)' },
     loginBody: { padding: '30px' },
     formGroup: { marginBottom: '25px', position: 'relative' },
@@ -87,8 +115,23 @@ export default function Login({ onLogin }) {
     modalBody: { padding: '25px' }
   }
 
+  // Подсветка input при фокусе
+  useEffect(() => {
+    const inputs = document.querySelectorAll('input')
+    inputs.forEach(input => {
+      input.addEventListener('focus', function() {
+        this.parentElement.style.boxShadow = '0 0 0 3px rgba(11, 61, 145, 0.1)'
+      })
+      input.addEventListener('blur', function() {
+        this.parentElement.style.boxShadow = 'none'
+      })
+    })
+  }, [])
+
   return (
     <div style={styles.container}>
+      <div style={styles.pattern}></div>
+
       <div style={styles.loginContainer}>
         <div style={styles.header}>
           <div style={styles.logoContainer}>
@@ -203,6 +246,16 @@ export default function Login({ onLogin }) {
           </div>
         </div>
       </div>
+
+      <style>
+        {`
+          @keyframes blink {
+            0% { opacity: 0.4; }
+            50% { opacity: 1; }
+            100% { opacity: 0.4; }
+          }
+        `}
+      </style>
     </div>
   )
 }
