@@ -1,0 +1,20 @@
+{
+  "files": {
+    "main.css": "./static/css/main.64c4e2a4.css",
+    "main.js": "./static/js/main.d2c01def.js",
+    "static/js/453.21b63a07.chunk.js": "./static/js/453.21b63a07.chunk.js",
+    "static/media/fa-solid-900.woff2": "./static/media/fa-solid-900.0ae4e6254fc19607c79e.woff2",
+    "static/media/fa-brands-400.woff2": "./static/media/fa-brands-400.e7461d69dbbff1310a5c.woff2",
+    "static/media/fa-regular-400.woff2": "./static/media/fa-regular-400.1f38a564cd9eae27ebc3.woff2",
+    "static/media/telegram-cloud-photo-size-2--x": "./static/media/telegram-cloud-photo-size-2-5386572108483657761-x.38fce13d67e37b6a64df",
+    "static/media/fa-v4compatibility.woff2": "./static/media/fa-v4compatibility.661bd6b7245d5205d3e1.woff2",
+    "index.html": "./index.html",
+    "main.64c4e2a4.css.map": "./static/css/main.64c4e2a4.css.map",
+    "main.d2c01def.js.map": "./static/js/main.d2c01def.js.map",
+    "453.21b63a07.chunk.js.map": "./static/js/453.21b63a07.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.64c4e2a4.css",
+    "static/js/main.d2c01def.js"
+  ]
+}
