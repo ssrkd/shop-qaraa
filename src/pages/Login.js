@@ -3,7 +3,7 @@ import { supabase } from '../supabaseClient'
 import { useNavigate } from 'react-router-dom'
 import logo from '../images/qara.png'
 
-export default function App({ onLogin }) { // <-- добавил onLogin
+export default function App({ onLogin }) { // <-- добавлен onLogin
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");           
@@ -35,12 +35,27 @@ export default function App({ onLogin }) { // <-- добавил onLogin
           setError('');
         }, 2000);
       } else {
-        // Добавляем передачу данных юзера
-        if (onLogin) onLogin(data); // <-- это важно для редиректа
+        // Устанавливаем is_online = true при входе
+        await supabase
+          .from('login')
+          .update({ is_online: true })
+          .eq('id', data.id);
+
+        // Логируем вход один раз
+        await supabase
+          .from('logs')
+          .insert([{
+            user_id: data.id,
+            action: `${data.username} вошёл в систему`,
+            created_at: new Date()
+          }]);
+
+        // Передаем данные пользователя наверх
+        if (onLogin) onLogin({ ...data, is_online: true });
 
         setLoginStatus('success');
 
-        setTimeout(() => navigate('/'), 500); // можно оставить, но App.js сам покажет Dashboard
+        setTimeout(() => navigate('/'), 500); 
       }
     } catch (err) {
       setError('Ошибка при авторизации');
@@ -117,7 +132,7 @@ export default function App({ onLogin }) { // <-- добавил onLogin
         <div className="login-container">
           <div className="header">
             <div className="logo-container">
-            <img src={logo} alt="qaraa" className="logo" />
+              <img src={logo} alt="qaraa" className="logo" />
             </div>
             <h1 className="title">qaraa</h1>
             <p className="subtitle">Система безопасного доступа</p>
