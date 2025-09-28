@@ -1056,27 +1056,6 @@ export default function Dashboard({ user, onLogout }) {
           font-size: 14px;
         }
 
-        .admin-panel-btn {
-  background: var(--accent-color);
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: all 0.3s;
-  font-size: 16px;
-}
-
-.admin-panel-btn:hover {
-  background: #d4a15c;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-}
-
         .action-btn.primary {
           background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
           color: white;
@@ -1179,24 +1158,16 @@ export default function Dashboard({ user, onLogout }) {
         }
       `}</style>
 
-<div className="dashboard-header">
-  <div className="user-section">
-    <div className="user-avatar"><i className="fas fa-user"></i></div>
-    <div className="user-info">
-      <h2>{user.fullname}</h2>
-      <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
-    </div>
-  </div>
-
-  <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
-    {user.role === 'owner' && (
-      <button 
-        className="admin-panel-btn"
-        onClick={() => navigate('/admin-panel')}
-      >
-        <i className="fas fa-tools"></i> Админ-панель
-      </button>
-    )}
+<div className="dashboard">
+        {/* dashboard-header и навигация */}
+        <div className="dashboard-header">
+          <div className="user-section">
+            <div className="user-avatar"><i className="fas fa-user"></i></div>
+            <div className="user-info">
+              <h2>{user.fullname}</h2>
+              <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
+            </div>
+          </div>
           
           <button className="logout-btn" onClick={handleLogout}>
             <i className="fas fa-sign-out-alt"></i>
