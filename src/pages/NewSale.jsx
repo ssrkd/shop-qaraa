@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 
 export default function NewSale({ user, onBack }) {
+    const navigate = useNavigate();
   const [barcode, setBarcode] = useState('');
   const [typingTimeout, setTypingTimeout] = useState(null);
   const [productName, setProductName] = useState('');
@@ -235,46 +237,59 @@ const incrementQuantity = async (index) => {
       setSuccess('');
       return;
     }
-
+  
     setIsLoading(true);
     setError('');
     setSuccess('');
-
+  
     try {
+      // Получаем текущую дату и время Алматы
+      const now = new Date();
+      const almatyTime = new Date(now.getTime() + 5 * 60 * 60 * 1000); // +6 часов
+      const formattedTime = almatyTime.toISOString().slice(0, 19); // YYYY-MM-DDTHH:MM:SS
+  
       const inserts = cart.map(item => ({
-        seller_id: user.id,
+        seller_id: user.fullname,
         product: item.productName,
         barcode: item.barcode,
         size: item.size,
-        quantity: item.quantity,
-        price: item.price,
-        created_at: new Date()
+        quantity: Number(item.quantity),
+        price: Number(item.price),
+        created_at: formattedTime // вставляем без миллисекунд и UTC
       }));
-
-      const { error } = await supabase.from('sales').insert(inserts);
-
-      if (error) {
-        setError(error.message);
+  
+      const { error: salesError } = await supabase.from('sales').insert(inserts);
+  
+      if (salesError) {
+        setError(salesError.message);
         setSuccess('');
-      } else {
-        setSuccess('Продажа успешно добавлена!');
-        setCart([]);
-        // localStorage.removeItem('cart');
-
-        // Логирование продажи
-        for (let item of inserts) {
-          await supabase
-            .from('logs')
-            .insert([{
-              user_id: user.id,
-              action: `${user.username} добавил продажу: ${item.product} (${item.size}) x${item.quantity}`,
-              created_at: new Date()
-            }]);
-        }
+        return;
       }
+  
+      // Обновляем количество в products
+      for (let item of cart) {
+        const { data: productData } = await supabase
+          .from('products')
+          .select('*')
+          .eq('barcode', item.barcode)
+          .single();
+  
+        if (!productData) continue;
+  
+        const newQuantity = productData.quantity - item.quantity;
+  
+        await supabase
+          .from('products')
+          .update({ quantity: newQuantity })
+          .eq('barcode', item.barcode);
+      }
+  
+      setSuccess('Продажа успешно добавлена!');
+      setTimeout(() => setSuccess(''), 2500);
+      setCart([]);
+  
     } catch (err) {
       setError('Ошибка при добавлении продажи');
-      setSuccess('');
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -883,23 +898,23 @@ const incrementQuantity = async (index) => {
               )}
             </button>
             
-            <button 
+            {/* <button 
               className="btn btn-warning" 
               onClick={onBack || (() => {})}
               disabled={isLoading}
             >
               <i className="fas fa-times"></i>
               Отмена
-            </button>
+            </button> */}
             
             <button 
-              className="btn btn-success" 
-              onClick={onBack || (() => {})}
-              disabled={isLoading}
-            >
-              <i className="fas fa-home"></i>
-              На главную
-            </button>
+      className="btn btn-success" 
+      onClick={() => navigate('/dashboard')} // переход на главную
+      disabled={isLoading}
+    >
+      <i className="fas fa-home"></i>
+      На главную
+    </button>
           </div>
         </div>
       </div>

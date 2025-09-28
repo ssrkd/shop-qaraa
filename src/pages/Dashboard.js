@@ -8,21 +8,47 @@ export default function Dashboard({ user, onLogout }) {
   const [logs, setLogs] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [logFilter, setLogFilter] = useState('all');
+  const [sales, setSales] = useState([]);
 
   const navigate = useNavigate();
-  const loggedOnce = useRef(null);  
+  const loggedOnce = useRef(false);  
 
   // === EFFECT ДЛЯ OWNER ===
   useEffect(() => {
     let interval;
 
+    const fetchSales = async () => {
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) console.error('Ошибка загрузки продаж:', error);
+      else setSales(data);
+    };
+
+    const fetchSellers = async () => {
+      const { data, error } = await supabase.from('login').select('*').eq('role', 'seller');
+      if (error) console.error('Ошибка при загрузке продавцов:', error);
+      else {
+        setSellers(data);
+        setOnlineSellers(data.filter(s => s.is_online));
+      }
+    };
+
+    const fetchLogs = async () => {
+      const { data, error } = await supabase
+        .from('logs')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) console.error('Ошибка загрузки логов:', error);
+      else setLogs(data);
+    };
+
     const handleBeforeUnload = async (event) => {
       if (user.role === 'seller') {
         await markOnline(user.id, false);
-        const now = new Date();
-        const almatyTime = new Date(now.getTime() + 5 * 60 * 60 * 1000);
-        const logData = JSON.stringify({ fullname: user.fullname, action: 'Вышел из системы', created_at: almatyTime });
-        if (navigator.sendBeacon) navigator.sendBeacon('/api/log', logData);
+        await logAction('Вышел из системы', false);
       }
     };
 
@@ -31,9 +57,11 @@ export default function Dashboard({ user, onLogout }) {
     if (user.role === 'owner') {
       fetchSellers();
       fetchLogs();
+      fetchSales();
       interval = setInterval(() => {
         fetchSellers();
         fetchLogs();
+        fetchSales();
       }, 5000);
     }
 
@@ -41,21 +69,12 @@ export default function Dashboard({ user, onLogout }) {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       if (interval) clearInterval(interval);
     };
-  }, []);
+  }, [user]);
 
   // === Функции ===
   const markOnline = async (id, status) => {
     const { error } = await supabase.from('login').update({ is_online: status }).eq('id', id);
     if (error) console.error('Ошибка при обновлении статуса онлайн:', error);
-  };
-
-  const fetchSellers = async () => {
-    const { data, error } = await supabase.from('login').select('*').eq('role', 'seller');
-    if (error) console.error('Ошибка при загрузке продавцов:', error);
-    else {
-      setSellers(data);
-      setOnlineSellers(data.filter(s => s.is_online));
-    }
   };
 
   const addSeller = async () => {
@@ -95,18 +114,32 @@ export default function Dashboard({ user, onLogout }) {
   };
 
   const fetchLogs = async () => {
-    const { data, error } = await supabase.from('logs').select('*').order('created_at', { ascending: false }).limit(20);
+    const { data, error } = await supabase
+      .from('logs')
+      .select('*')
+      .order('created_at', { ascending: false });
     if (error) console.error('Ошибка загрузки логов:', error);
     else setLogs(data);
   };
 
   // === ЛОГИН ПРИ ВХОДЕ (только один раз) ===
   useEffect(() => {
-    if (!user?.id || loggedOnce.current === user.id) return;
-  
-    loggedOnce.current = user.id;
-    markOnline(user.id, true);
-    logAction('Вошёл в систему'); // Запись в Supabase и обновление локального лога
+    const logLogin = async () => {
+      if (!user) return;
+      const now = new Date();
+      const almatyTime = new Date(now.getTime() + 5 * 60 * 60 * 1000);
+      const { error } = await supabase.from('logs').insert([{
+        fullname: user.fullname,
+        action: 'Вошёл в систему',
+        created_at: almatyTime
+      }]);
+      if (error) console.error('Ошибка при добавлении лога входа:', error);
+    };
+
+    if (!loggedOnce.current) {
+      loggedOnce.current = true;
+      logLogin();
+    }
   }, [user]);
 
   const handleLogout = async () => {
@@ -116,17 +149,9 @@ export default function Dashboard({ user, onLogout }) {
     }
     onLogout();
   };
-  const handleCancel = async () => {
-    await logAction('Вернулся на главный экран');
-    navigate('/');
-  };
-  
-  const handleLogin = async () => {
-    await logAction('Вошёл в систему');
-  };
+
   const logAction = async (action, doFetch = true) => {
     if (!user) return;
-  
     const now = new Date();
     const almatyTime = new Date(now.getTime() + 5 * 60 * 60 * 1000);
     const { error } = await supabase.from('logs').insert([{ fullname: user.fullname, action, created_at: almatyTime }]);
@@ -150,13 +175,6 @@ export default function Dashboard({ user, onLogout }) {
           <div className="stat-info">
             <div className="stat-number">{onlineSellers.length}</div>
             <div className="stat-label">В сети сейчас</div>
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon sales"><i className="fas fa-chart-line"></i></div>
-          <div className="stat-info">
-            <div className="stat-number">0</div>
-            <div className="stat-label">Продаж сегодня</div>
           </div>
         </div>
         <div className="stat-card">
@@ -315,13 +333,13 @@ export default function Dashboard({ user, onLogout }) {
               <i className="fas fa-sign-out-alt"></i>
               Выход
             </button>
-            <button 
+            {/* <button 
               onClick={() => setLogFilter('sale')} 
               className={`filter-btn ${logFilter === 'sale' ? 'active' : ''}`}
             >
               <i className="fas fa-shopping-cart"></i>
               Продажи
-            </button>
+            </button> */}
           </div>
         </div>
         
@@ -1038,6 +1056,27 @@ export default function Dashboard({ user, onLogout }) {
           font-size: 14px;
         }
 
+        .admin-panel-btn {
+  background: var(--accent-color);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s;
+  font-size: 16px;
+}
+
+.admin-panel-btn:hover {
+  background: #d4a15c;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+
         .action-btn.primary {
           background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
           color: white;
@@ -1140,46 +1179,55 @@ export default function Dashboard({ user, onLogout }) {
         }
       `}</style>
 
-<div className="dashboard">
-      {/* dashboard-header и навигация */}
-      <div className="dashboard-header">
-        <div className="user-section">
-          <div className="user-avatar"><i className="fas fa-user"></i></div>
-          <div className="user-info">
-            <h2>{user.fullname}</h2>
-            <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
-          </div>
-        </div>
-        <button className="logout-btn" onClick={handleLogout}>
-          <i className="fas fa-sign-out-alt"></i>
-          Выйти
-        </button>
-      </div>
+<div className="dashboard-header">
+  <div className="user-section">
+    <div className="user-avatar"><i className="fas fa-user"></i></div>
+    <div className="user-info">
+      <h2>{user.fullname}</h2>
+      <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
+    </div>
+  </div>
 
-      <div className="dashboard-content">
-        {user.role === 'owner' ? (
-          <>
-            <div className="nav-tabs">
-              <button className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-                <i className="fas fa-chart-pie"></i> Обзор
-              </button>
-              <button className={`nav-tab ${activeTab === 'sellers' ? 'active' : ''}`} onClick={() => setActiveTab('sellers')}>
-                <i className="fas fa-users"></i> Продавцы
-              </button>
-              <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
-                <i className="fas fa-file-alt"></i> Журнал
-              </button>
-            </div>
+  <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
+    {user.role === 'owner' && (
+      <button 
+        className="admin-panel-btn"
+        onClick={() => navigate('/admin-panel')}
+      >
+        <i className="fas fa-tools"></i> Админ-панель
+      </button>
+    )}
+          
+          <button className="logout-btn" onClick={handleLogout}>
+            <i className="fas fa-sign-out-alt"></i>
+            Выйти
+          </button>
+        </div>
+
+        <div className="dashboard-content">
+          {user.role === 'owner' ? (
+            <>
+              <div className="nav-tabs">
+                <button className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+                  <i className="fas fa-chart-pie"></i> Обзор
+                </button>
+                <button className={`nav-tab ${activeTab === 'sellers' ? 'active' : ''}`} onClick={() => setActiveTab('sellers')}>
+                  <i className="fas fa-users"></i> Продавцы
+                </button>
+                <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
+                  <i className="fas fa-file-alt"></i> Журнал
+                </button>
+              </div>
+              <div className="tab-content">
+                {activeTab === 'overview' && <OverviewTab />}
+                {activeTab === 'sellers' && <SellersTab />}
+                {activeTab === 'logs' && <LogsTab />}
+              </div>
+            </>
+          ) : (
             <div className="tab-content">
-              {activeTab === 'overview' && <OverviewTab />}
-              {activeTab === 'sellers' && <SellersTab />}
-              {activeTab === 'logs' && <LogsTab />}
+              <SellerDashboard />
             </div>
-          </>
-        ) : (
-          <div className="tab-content">
-            <SellerDashboard />
-          </div>
           )}
         </div>
       </div>
