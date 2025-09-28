@@ -58,16 +58,17 @@ useEffect(() => {
 
 
   // Функция для поиска товара по штрихкоду
-  const fetchProductByBarcode = async (code) => {
+const fetchProductByBarcode = async (code) => {
     if (!code) return;
-
-    const { data, error } = await supabase
+  
+    // Находим сам товар
+    const { data: product, error: productError } = await supabase
       .from('products')
       .select('*')
       .eq('barcode', code)
       .single();
-
-    if (error || !data) {
+  
+    if (productError || !product) {
       setProductName('');
       setPrice('');
       setAvailableSizes([]);
@@ -75,12 +76,34 @@ useEffect(() => {
       setError('Товар с таким штрихкодом не найден');
       return;
     }
-
+  
+    // Находим все варианты (размеры) этого товара
+    const { data: variants, error: variantsError } = await supabase
+      .from('product_variants')
+      .select('*')
+      .eq('product_id', product.id);
+  
+    if (variantsError || !variants.length) {
+      setProductName(product.name);
+      setAvailableSizes([]);
+      setSize('');
+      setError('Для этого товара нет вариантов');
+      return;
+    }
+  
     setError('');
-    setProductName(data.name);
-    setPrice(data.price || '');
-    setAvailableSizes(data.size ? data.size.split(',') : []);
+    setProductName(product.name);
+    setAvailableSizes(variants.map(v => ({ size: v.size, price: v.price, quantity: v.quantity })));
     setSize('');
+  };
+
+  // Когда выбираем размер
+const handleSizeChange = (selectedSize) => {
+    setSize(selectedSize);
+    const variant = availableSizes.find(v => v.size === selectedSize);
+    if (variant) {
+      setPrice(variant.price);
+    }
   };
 
   // Добавление товара в корзину
@@ -91,50 +114,28 @@ useEffect(() => {
       return;
     }
   
-    const numericPrice = Number(price);
-    const numericQuantity = Number(quantity);
-  
-    // Проверяем наличие выбранного размера и количества в БД
-    const { data: productData } = await supabase
-      .from('products')
-      .select('*')
-      .eq('barcode', barcode)
-      .single();
-  
-    if (!productData) {
-      setError('Товар не найден');
-      setSuccess('');
-      return;
-    }
-  
-    const sizesArray = productData.size ? productData.size.split(',') : [];
-    if (!sizesArray.includes(size)) {
+    const variant = availableSizes.find(v => v.size === size);
+    if (!variant) {
       setError(`Размер ${size} недоступен`);
       setSuccess('');
       return;
     }
   
-    // Считаем сколько уже добавлено в корзину этого товара и размера
-    const existingInCart = cart
-      .filter(item => item.barcode === barcode && item.size === size)
-      .reduce((sum, item) => sum + item.quantity, 0);
-  
-    if (numericQuantity + existingInCart > productData.quantity) {
-      setError(`Недостаточно товара на складе. Доступно: ${productData.quantity - existingInCart}`);
+    if (quantity > variant.quantity) {
+      setError(`Недостаточно товара. Доступно: ${variant.quantity}`);
       setSuccess('');
       return;
     }
   
-    // Добавляем товар в корзину
+    // Добавляем в корзину
     setCart(prev => [
       ...prev,
       {
         barcode,
         productName,
         size,
-        quantity: numericQuantity,
-        price: numericPrice,
-        availableSizes
+        quantity: Number(quantity),
+        price: Number(price)
       }
     ]);
   
@@ -267,22 +268,27 @@ const incrementQuantity = async (index) => {
       }
   
       // Обновляем количество в products
-      for (let item of cart) {
-        const { data: productData } = await supabase
-          .from('products')
-          .select('*')
-          .eq('barcode', item.barcode)
-          .single();
+      // Обновляем количество в product_variants
+for (let item of cart) {
+    // Находим вариант
+    const { data: variant } = await supabase
+      .from('product_variants')
+      .select('*')
+      .eq('size', item.size)
+      .eq('product_id', 
+          (await supabase.from('products').select('id').eq('barcode', item.barcode).single()).data.id
+      )
+      .single();
   
-        if (!productData) continue;
+    if (!variant) continue;
   
-        const newQuantity = productData.quantity - item.quantity;
+    const newQuantity = variant.quantity - item.quantity;
   
-        await supabase
-          .from('products')
-          .update({ quantity: newQuantity })
-          .eq('barcode', item.barcode);
-      }
+    await supabase
+      .from('product_variants')
+      .update({ quantity: newQuantity })
+      .eq('id', variant.id);
+  }
   
       setSuccess('Продажа успешно добавлена!');
       setTimeout(() => setSuccess(''), 2500);
@@ -781,7 +787,7 @@ const incrementQuantity = async (index) => {
 
                 <div className="form-group">
                   <label className="form-label">
-                    <i className="fas fa-dollar-sign"></i>
+                    <i className="fas fa-tenge-sign"></i>
                     Цена за единицу
                   </label>
                   <input
@@ -797,21 +803,23 @@ const incrementQuantity = async (index) => {
               </div>
 
               <div className="form-group">
-                <label className="form-label">
-                  <i className="fas fa-tshirt"></i>
-                  Размер
-                </label>
-                <select
-                  className="form-input"
-                  value={size}
-                  onChange={e => setSize(e.target.value)}
-                >
-                  <option value="">Выберите размер</option>
-                  {availableSizes.map((s, idx) => (
-                    <option key={idx} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
+  <label className="form-label">
+    <i className="fas fa-tshirt"></i>
+    Размер
+  </label>
+  <select
+    className="form-input"
+    value={size}
+    onChange={e => handleSizeChange(e.target.value)}
+  >
+    <option value="">Выберите размер</option>
+    {availableSizes.map((s, idx) => (
+      <option key={idx} value={s.size}>
+        {s.size}
+      </option>
+    ))}
+  </select>
+</div>
 
               <button
                 className="btn btn-success"
@@ -844,9 +852,9 @@ const incrementQuantity = async (index) => {
         onChange={(e) => changeSize(idx, e.target.value)}
         style={{ margin: '0 5px' }}
       >
-        {item.availableSizes.map((s, i) => (
-          <option key={i} value={s}>{s}</option>
-        ))}
+        {availableSizes.map((s, i) => (
+  <option key={i} value={s.size}>{s.size}</option>
+))}
       </select>
       x {item.quantity} — {item.price * item.quantity}₸
     </span>

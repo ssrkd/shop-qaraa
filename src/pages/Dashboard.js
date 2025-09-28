@@ -1188,6 +1188,9 @@ export default function Dashboard({ user, onLogout }) {
                 <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
                   <i className="fas fa-file-alt"></i> Журнал
                 </button>
+                <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => navigate('/adminpanel')}>
+                  <i className="fas fa-crown"></i> Админ-панель
+                </button>
               </div>
               <div className="tab-content">
                 {activeTab === 'overview' && <OverviewTab />}
