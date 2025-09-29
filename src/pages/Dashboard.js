@@ -16,6 +16,7 @@ export default function Dashboard({ user, onLogout }) {
   // === EFFECT ДЛЯ OWNER ===
   useEffect(() => {
     let interval;
+    
 
     const fetchSales = async () => {
       const { data, error } = await supabase
@@ -1188,7 +1189,7 @@ export default function Dashboard({ user, onLogout }) {
                 <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
                   <i className="fas fa-file-alt"></i> Журнал
                 </button>
-                <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => navigate('/adminpanel')}>
+                <button className={`nav-tab ${activeTab === 'srk' ? 'active' : ''}`} onClick={() => navigate('/adminpanel')}>
                   <i className="fas fa-crown"></i> Админ-панель
                 </button>
               </div>
@@ -1204,6 +1205,19 @@ export default function Dashboard({ user, onLogout }) {
             </div>
           )}
         </div>
+        <footer
+  style={{
+    textAlign: "center",
+    padding: "12px",
+    fontSize: "13px",
+    color: "#666",
+    borderTop: "1px solid #ddd",
+    background: "#f9f9f9"
+  }}
+>
+  © qaraa.kz | Система безопасного доступа, 2025. <br />
+  Последнее обновление: 29.09.2025 | srk.
+</footer>
       </div>
     </>
   );

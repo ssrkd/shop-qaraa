@@ -926,6 +926,19 @@ for (let item of cart) {
           </div>
         </div>
       </div>
+      <footer
+  style={{
+    textAlign: "center",
+    padding: "12px",
+    fontSize: "13px",
+    color: "#666",
+    borderTop: "1px solid #ddd",
+    background: "#f9f9f9"
+  }}
+>
+  © qaraa.kz | Система безопасного доступа, 2025. <br />
+  Последнее обновление: 29.09.2025 | srk.
+</footer>
     </>
   );
 }
