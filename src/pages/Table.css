@@ -1,0 +1,27 @@
+.table-wrapper {
+    width: 100%;
+    overflow-x: auto; /* горизонтальный скролл при длинных текстах */
+  }
+  
+  .sales-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  
+  .sales-table th,
+  .sales-table td {
+    border: 1px solid #ccc;
+    padding: 8px 12px;
+    text-align: left;
+    white-space: nowrap; /* чтобы текст не ломался */
+  }
+  
+  .sales-table th {
+    background-color: #f5f5f5;
+  }
+  
+  .sales-table td {
+    max-width: 250px; /* ограничение ширины ячейки */
+    overflow: hidden;
+    text-overflow: ellipsis; /* если текст не помещается, показываем "..." */
+  }

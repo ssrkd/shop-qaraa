@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
 export default function AdminPanel({ onBack, user }) {
   const navigate = useNavigate();
@@ -10,10 +12,9 @@ export default function AdminPanel({ onBack, user }) {
   const [activeTab, setActiveTab] = useState("sales");
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
-  const [barcode, setBarcode] = useState("");
-  const [newProduct, setNewProduct] = useState({ name: "", price: "" });
-  const [step, setStep] = useState("barcode");
   const [foundProduct, setFoundProduct] = useState(null);
+  const [step, setStep] = useState("barcode");
+
   const [form, setForm] = useState({
     barcode: "",
     name: "",
@@ -21,6 +22,7 @@ export default function AdminPanel({ onBack, user }) {
     sizes: { S: "", M: "", L: "" },
   });
 
+  // Проверка роли
   useEffect(() => {
     const fetchRole = async () => {
       if (!user) return;
@@ -46,12 +48,14 @@ export default function AdminPanel({ onBack, user }) {
     fetchRole();
   }, [user, navigate]);
 
+  // Загрузка данных по вкладкам
   useEffect(() => {
     if (activeTab === "sales") fetchSales();
     if (activeTab === "products") fetchProducts();
     if (activeTab === "добавить") resetForm();
   }, [activeTab]);
 
+  // Автоматическая проверка штрих-кода
   useEffect(() => {
     if (activeTab === "добавить" && step === "barcode" && form.barcode.trim()) {
       const timeout = setTimeout(() => {
@@ -61,56 +65,7 @@ export default function AdminPanel({ onBack, user }) {
     }
   }, [form.barcode, activeTab, step]);
 
-  async function fetchNew() {
-    if (!barcode.trim()) {
-      setFoundProduct(null);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("products")
-      .select("id, name, barcode, product_variants(size, quantity, price)")
-      .eq("barcode", barcode)
-      .maybeSingle();
-
-    if (data) {
-      setFoundProduct(data);
-      setNewProduct({ name: "", price: "" });
-    } else {
-      setFoundProduct(null);
-    }
-  }
-
-  async function saveNewProduct() {
-    if (!barcode.trim() || !newProduct.name.trim() || !newProduct.price.trim()) {
-      alert("Заполните все поля");
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("products")
-      .insert([{ name: newProduct.name, barcode }])
-      .select()
-      .single();
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    await supabase.from("product_variants").insert([
-      {
-        product_id: data.id,
-        size: "—",
-        quantity: 0,
-        price: parseFloat(newProduct.price),
-      },
-    ]);
-
-    setNewProduct({ name: "", price: "" });
-    setBarcode("");
-    fetchProducts();
-  }
+  // --- API функции ---
 
   async function fetchSales() {
     const { data, error } = await supabase
@@ -121,20 +76,16 @@ export default function AdminPanel({ onBack, user }) {
   }
 
   async function fetchProducts() {
-    const { data: products, error } = await supabase
+    const { data, error } = await supabase
       .from("products")
       .select("id, name, barcode, product_variants(id, size, quantity, price)")
       .order("id");
-
-    if (!error) setProducts(products);
+    if (!error) setProducts(data);
   }
 
   async function checkBarcode() {
     const barcodeTrim = form.barcode.trim();
-    if (!barcodeTrim) {
-      alert("Введите штрих-код");
-      return;
-    }
+    if (!barcodeTrim) return;
 
     const { data, error } = await supabase
       .from("products")
@@ -162,7 +113,51 @@ export default function AdminPanel({ onBack, user }) {
     }
   }
 
+  function exportToExcel(data, filename) {
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    saveAs(new Blob([wbout], { type: "application/octet-stream" }), `${filename}.xlsx`);
+  }
+
+  function handleExportSales() {
+    const salesData = sales.map(s => ({
+      "ID": s.id ?? "",
+      "Продавец": s.seller_id ?? "",
+      "Товар": s.product ?? "",
+      "Штрихкод": s.barcode ?? "",
+      "Размер": s.size ?? "",
+      "Количество": s.quantity ?? 0,
+      "Цена": s.price ?? 0,
+      "Дата": s.created_at ? new Date(s.created_at).toLocaleString("ru-RU") : ""
+    }));
+    exportToExcel(salesData, "Продажи");
+  }
+
+  function handleExportProducts() {
+    const productsData = [];
+    products.forEach(p => {
+      p.product_variants.forEach(v => {
+        productsData.push({
+          "ID": p.id ?? "",
+          "Название": p.name ?? "",
+          "Штрихкод": p.barcode ?? "",
+          "Размер": v.size ?? "",
+          "Остаток": v.quantity ?? 0,
+          "Цена": v.price ?? 0
+        });
+      });
+    });
+    exportToExcel(productsData, "Товары");
+  }
+
   async function registerProduct() {
+    if (!form.name.trim() || !form.barcode.trim() || !form.price.trim()) {
+      alert("Заполните все поля");
+      return;
+    }
+
     const { data, error } = await supabase
       .from("products")
       .insert([{ name: form.name, barcode: form.barcode }])
@@ -210,8 +205,12 @@ export default function AdminPanel({ onBack, user }) {
       }
     }
 
+    // 🔥 Автообновление данных после добавления
+    await fetchProducts();
+    await fetchSales();
+
     resetForm();
-    fetchProducts();
+    setActiveTab("products"); // после добавления возвращаем к списку товаров
   }
 
   function resetForm() {
@@ -253,23 +252,23 @@ export default function AdminPanel({ onBack, user }) {
               Админ-панель
             </h1>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button 
-                onClick={onBack}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: '#f3f4f6',
-                  color: '#374151',
-                  borderRadius: '0.5rem',
-                  border: 'none',
-                  fontWeight: '500',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-                onMouseOver={(e) => e.target.style.background = '#e5e7eb'}
-                onMouseOut={(e) => e.target.style.background = '#f3f4f6'}
-              >
-                ← Назад
-              </button>
+            <button 
+  onClick={resetForm}   // только сброс формы
+  style={{
+    padding: '0.5rem 1rem',
+    background: '#f3f4f6',
+    color: '#374151',
+    borderRadius: '0.5rem',
+    border: 'none',
+    fontWeight: '500',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  }}
+  onMouseOver={(e) => e.target.style.background = '#e5e7eb'}
+  onMouseOut={(e) => e.target.style.background = '#f3f4f6'}
+>
+  ← Очистить форму
+</button>
               <button 
                 onClick={() => navigate('/dashboard')} 
                 disabled={isLoading}
@@ -363,6 +362,39 @@ export default function AdminPanel({ onBack, user }) {
           boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
           padding: '1.5rem'
         }}>
+            {/* Кнопки Excel */}
+          <div style={{ marginBottom: '1rem' }}>
+            {activeTab === "sales" && (
+              <button
+                onClick={handleExportSales}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: '#3b82f6',
+                  color: 'white',
+                  borderRadius: '0.5rem',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                💾 Скачать Excel
+              </button>
+            )}
+            {activeTab === "products" && (
+              <button
+                onClick={handleExportProducts}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: '#3b82f6',
+                  color: 'white',
+                  borderRadius: '0.5rem',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                💾 Скачать Excel
+              </button>
+            )}
+          </div>
           {activeTab === "sales" && (
             <div>
               <h2 style={{
@@ -864,6 +896,36 @@ export default function AdminPanel({ onBack, user }) {
                           </div>
                         </div>
                       </div>
+
+                      // Оборачиваем таблицу в контейнер для скролла
+<div style={{ overflowX: 'auto', width: '100%' }}>
+  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <thead>
+      <tr>
+        <th>Продавец</th>
+        <th>Товар</th>
+        <th>Штрихкод</th>
+        <th>Размер</th>
+        <th>Количество</th>
+        <th>Цена</th>
+        <th>Дата</th>
+      </tr>
+    </thead>
+    <tbody>
+      {sales.map((sale) => (
+        <tr key={sale.id}>
+          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{sale.seller}</td>
+          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{sale.product}</td>
+          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{sale.barcode}</td>
+          <td>{sale.size}</td>
+          <td>{sale.quantity}</td>
+          <td>{sale.price}</td>
+          <td>{sale.date}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
 
                       <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem' }}>
                         <button 

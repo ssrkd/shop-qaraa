@@ -9,9 +9,76 @@ export default function Dashboard({ user, onLogout }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [logFilter, setLogFilter] = useState('all');
   const [sales, setSales] = useState([]);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [salesToday, setSalesToday] = useState(0);
 
   const navigate = useNavigate();
   const loggedOnce = useRef(false);  
+
+  async function fetchSalesToday() {
+    const today = new Date();
+    const tzOffset = today.getTimezoneOffset();
+  
+    const startOfDayUTC = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
+    startOfDayUTC.setMinutes(startOfDayUTC.getMinutes() - tzOffset);
+  
+    const endOfDayUTC = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    endOfDayUTC.setMinutes(endOfDayUTC.getMinutes() - tzOffset);
+  
+    const { data, error } = await supabase
+      .from('sales')
+      .select('*', { count: 'exact' })
+      .gte('created_at', startOfDayUTC.toISOString())
+      .lte('created_at', endOfDayUTC.toISOString());
+  
+    if (error) {
+      console.error(error);
+    } else {
+      setSalesToday(data.length); // количество продаж
+    }
+  }
+
+  useEffect(() => {
+    fetchSalesToday(); // начальная загрузка
+  
+    // создаём канал для подписки
+    const salesChannel = supabase
+      .channel('public:sales') // любое уникальное имя канала
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sales' },
+        (payload) => {
+          const saleDate = new Date(payload.new.created_at);
+          const today = new Date();
+          if (
+            saleDate.getFullYear() === today.getFullYear() &&
+            saleDate.getMonth() === today.getMonth() &&
+            saleDate.getDate() === today.getDate()
+          ) {
+            setSalesToday(prev => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+  
+    return () => {
+      supabase.removeChannel(salesChannel);
+    };
+  }, []);
+
+  useEffect(() => {
+    // обновляем время каждую секунду
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(interval); // чистим, чтобы не было утечек
+  }, []);
+
+  // форматирование времени (часы:минуты:секунды)
+  const formatTime = (date) => {
+    return date.toLocaleTimeString("ru-RU", { hour12: false });
+  };
 
   // === EFFECT ДЛЯ OWNER ===
   useEffect(() => {
@@ -178,6 +245,13 @@ export default function Dashboard({ user, onLogout }) {
             <div className="stat-label">В сети сейчас</div>
           </div>
         </div>
+        <div className="stat-card">
+  <div className="stat-icon sales"><i className="fas fa-chart-line"></i></div>
+  <div className="stat-info">
+    <div className="stat-number">{salesToday}</div>
+    <div className="stat-label">Продаж сегодня</div>
+  </div>
+</div>
         <div className="stat-card">
           <div className="stat-icon logs"><i className="fas fa-clipboard-list"></i></div>
           <div className="stat-info">
@@ -411,7 +485,7 @@ export default function Dashboard({ user, onLogout }) {
           <div className="action-content">
             <h4>История продаж</h4>
             <p>Просмотр всех продаж</p>
-            <button className="action-btn secondary">
+            <button className="action-btn primary" onClick={() => navigate('/sales-history')}>
               Посмотреть историю
             </button>
           </div>
@@ -1169,12 +1243,21 @@ export default function Dashboard({ user, onLogout }) {
               <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
             </div>
           </div>
-          
+
+          <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+          <span className="time">{formatTime(currentTime)}</span>
           <button className="logout-btn" onClick={handleLogout}>
             <i className="fas fa-sign-out-alt"></i>
             Выйти
           </button>
         </div>
+      </div>
+      
+          {/* <button className="logout-btn" onClick={handleLogout}>
+            <i className="fas fa-sign-out-alt"></i>
+            Выйти
+          </button>
+        </div> */}
 
         <div className="dashboard-content">
           {user.role === 'owner' ? (
@@ -1216,7 +1299,7 @@ export default function Dashboard({ user, onLogout }) {
   }}
 >
   © qaraa.kz | Система безопасного доступа, 2025. <br />
-  Последнее обновление: 29.09.2025 | srk.
+  Последнее обновление: 30.09.2025 | srk.
 </footer>
       </div>
     </>

@@ -5,6 +5,7 @@ import Preloader from './pages/Preloader'
 import Login from './pages/Login'
 import NewSale from './pages/NewSale'
 import AdminPanel from './pages/AdminPanel'
+import SalesHistory from './pages/SalesHistory'
 import '@fortawesome/fontawesome-free/css/all.min.css'
 
 function App() {
@@ -62,6 +63,12 @@ function App() {
         <Route
           path="/adminpanel"
           element={user ? <AdminPanel user={user} /> : <Navigate to="/login" />}
+        />
+
+        {/* SalesHistory */}
+        <Route
+          path="/sales-history"
+          element={user ? <SalesHistory user={user} /> : <Navigate to="/login" />}
         />
 
         {/* Любой другой путь → редирект на "/" */}
