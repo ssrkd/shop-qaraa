@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
+import pdfMake from "pdfmake/build/pdfmake";
+import robotoFonts from "../fonts/vfs_fonts"; // 👈 твой файл
+
+pdfMake.vfs = robotoFonts.pdfMake.vfs;
 
 export default function AdminPanel({ onBack, user }) {
   const navigate = useNavigate();
@@ -113,14 +117,69 @@ export default function AdminPanel({ onBack, user }) {
     }
   }
 
-  function exportToExcel(data, filename) {
-    const ws = XLSX.utils.json_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
-    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    saveAs(new Blob([wbout], { type: "application/octet-stream" }), `${filename}.xlsx`);
+  
+// Создаём PDF с поддержкой кириллицы
+
+function exportToPDF(data, title = "Отчет") {
+    const body = [
+      Object.keys(data[0]),
+      ...data.map(row => Object.values(row).map(v => String(v ?? "")))
+    ];
+  
+    const docDefinition = {
+      content: [
+        { text: title, style: "header" },
+        { table: { headerRows: 1, body } }
+      ],
+      styles: {
+        header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] }
+      },
+      defaultStyle: {
+        font: "Roboto"
+      }
+    };
+  
+    pdfMake.createPdf(docDefinition).download(`${title}.pdf`);
   }
 
+  // Вынесенная функция для экспорта
+  function exportToExcel(data, sheetName = "Sheet1", fileName = "data.xlsx") {
+    if (!data || !data.length) return;
+
+    const ws = XLSX.utils.json_to_sheet(data);
+
+// Автоширина колонок
+const cols = Object.keys(data[0]).map((key) => {
+    const maxLength = data.reduce((max, row) => {
+      const value = row[key] ? row[key].toString() : "";
+      return Math.max(max, value.length);
+    }, key.length);
+    return { wch: maxLength + 2 };
+  });
+  ws["!cols"] = cols;
+
+// Центрирование колонок "Размер" и "Количество"
+const colKeys = Object.keys(sales[0]);
+const sizeColIndex = colKeys.indexOf("Размер");
+const qtyColIndex = colKeys.indexOf("Количество");
+
+Object.keys(ws).forEach((cell) => {
+  if (cell[0] === "!") return; // пропускаем служебные свойства
+  const col = XLSX.utils.decode_cell(cell).c;
+  if (col === sizeColIndex || col === qtyColIndex) {
+    ws[cell].s = {
+      alignment: { horizontal: "center", vertical: "center" }
+    };
+  }
+});
+  
+const wb = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(wb, ws, sheetName);
+const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
+saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
+}
+  
+  // Использование внутри компонента
   function handleExportSales() {
     const salesData = sales.map(s => ({
       "ID": s.id ?? "",
@@ -132,9 +191,9 @@ export default function AdminPanel({ onBack, user }) {
       "Цена": s.price ?? 0,
       "Дата": s.created_at ? new Date(s.created_at).toLocaleString("ru-RU") : ""
     }));
-    exportToExcel(salesData, "Продажи");
+    exportToExcel(salesData, "Продажи", "sales.xlsx");
   }
-
+  
   function handleExportProducts() {
     const productsData = [];
     products.forEach(p => {
@@ -149,7 +208,7 @@ export default function AdminPanel({ onBack, user }) {
         });
       });
     });
-    exportToExcel(productsData, "Товары");
+    exportToExcel(productsData, "Товары", "products.xlsx");
   }
 
   async function registerProduct() {
@@ -363,38 +422,81 @@ export default function AdminPanel({ onBack, user }) {
           padding: '1.5rem'
         }}>
             {/* Кнопки Excel */}
-          <div style={{ marginBottom: '1rem' }}>
-            {activeTab === "sales" && (
-              <button
-                onClick={handleExportSales}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  borderRadius: '0.5rem',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                💾 Скачать Excel
-              </button>
-            )}
-            {activeTab === "products" && (
-              <button
-                onClick={handleExportProducts}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: '#3b82f6',
-                  color: 'white',
-                  borderRadius: '0.5rem',
-                  border: 'none',
-                  cursor: 'pointer'
-                }}
-              >
-                💾 Скачать Excel
-              </button>
-            )}
-          </div>
+<div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
+  {activeTab === "sales" && (
+    <>
+      <button
+        onClick={handleExportSales}
+        style={{
+          padding: '0.5rem 1rem',
+          background: '#3b82f6',
+          color: 'white',
+          borderRadius: '0.5rem',
+          border: 'none',
+          cursor: 'pointer'
+        }}
+      >
+        💾 Excel (Продажи)
+      </button>
+
+      <button
+        onClick={() => exportToPDF(sales, "Продажи")}
+        style={{
+          padding: '0.5rem 1rem',
+          background: '#ef4444',
+          color: 'white',
+          borderRadius: '0.5rem',
+          border: 'none',
+          cursor: 'pointer'
+        }}
+      >
+        📄 PDF (Продажи)
+      </button>
+    </>
+  )}
+
+  {activeTab === "products" && (
+    <>
+      <button
+        onClick={handleExportProducts}
+        style={{
+          padding: '0.5rem 1rem',
+          background: '#3b82f6',
+          color: 'white',
+          borderRadius: '0.5rem',
+          border: 'none',
+          cursor: 'pointer'
+        }}
+      >
+        💾 Excel (Товары)
+      </button>
+
+      <button
+        onClick={() => exportToPDF(products.flatMap(p =>
+          p.product_variants.map(v => ({
+            ID: p.id,
+            Название: p.name,
+            Штрихкод: p.barcode,
+            Размер: v.size,
+            Остаток: v.quantity,
+            Цена: v.price,
+          }))
+        ), "Товары")}
+        style={{
+          padding: '0.5rem 1rem',
+          background: '#ef4444',
+          color: 'white',
+          borderRadius: '0.5rem',
+          border: 'none',
+          cursor: 'pointer'
+        }}
+      >
+        📄 PDF (Товары)
+      </button>
+    </>
+  )}
+</div>
+
           {activeTab === "sales" && (
             <div>
               <h2 style={{

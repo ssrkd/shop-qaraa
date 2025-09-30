@@ -50,32 +50,208 @@ export default function SalesHistory({ user }) {
     setLoading(false);
   }
 
-  // Печать чека
   const printReceipt = (sale) => {
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
       <html>
         <head>
           <title>Чек продажи</title>
+          <meta charset="UTF-8">
           <style>
-            body { font-family: 'Courier New', monospace; padding: 20px; max-width: 400px; margin: 0 auto; }
-            h2 { text-align: center; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
-            p { margin: 8px 0; }
-            .total { font-weight: bold; font-size: 1.2em; margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px; }
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            
+            body { 
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              padding: 30px 20px;
+              max-width: 400px;
+              margin: 0 auto;
+              background: #f5f5f5;
+            }
+            
+            .receipt {
+              background: white;
+              padding: 30px;
+              border-radius: 12px;
+              box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            }
+            
+            .header {
+              text-align: center;
+              margin-bottom: 25px;
+              padding-bottom: 20px;
+              border-bottom: 2px dashed #e0e0e0;
+            }
+            
+            .logo {
+              font-size: 24px;
+              font-weight: bold;
+              color: #2c3e50;
+              margin-bottom: 5px;
+            }
+            
+            .title {
+              font-size: 14px;
+              color: #7f8c8d;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            
+            .info-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 12px 0;
+              border-bottom: 1px solid #f0f0f0;
+            }
+            
+            .info-label {
+              color: #7f8c8d;
+              font-size: 14px;
+            }
+            
+            .info-value {
+              color: #2c3e50;
+              font-weight: 600;
+              font-size: 14px;
+            }
+            
+            .product-section {
+              margin: 20px 0;
+              padding: 15px;
+              background: #f8f9fa;
+              border-radius: 8px;
+            }
+            
+            .product-name {
+              font-size: 16px;
+              font-weight: bold;
+              color: #2c3e50;
+              margin-bottom: 8px;
+            }
+            
+            .product-details {
+              display: flex;
+              justify-content: space-between;
+              font-size: 14px;
+              color: #7f8c8d;
+              margin-top: 5px;
+            }
+            
+            .total-section {
+              margin-top: 20px;
+              padding-top: 20px;
+              border-top: 2px dashed #e0e0e0;
+            }
+            
+            .total {
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              padding: 15px;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              border-radius: 8px;
+              color: white;
+            }
+            
+            .total-label {
+              font-size: 16px;
+              font-weight: 600;
+            }
+            
+            .total-amount {
+              font-size: 24px;
+              font-weight: bold;
+            }
+            
+            .footer {
+              margin-top: 25px;
+              padding-top: 20px;
+              border-top: 2px dashed #e0e0e0;
+              text-align: center;
+            }
+            
+            .date {
+              color: #7f8c8d;
+              font-size: 13px;
+              margin-bottom: 15px;
+            }
+            
+            .website {
+              font-size: 16px;
+              font-weight: bold;
+              color: #667eea;
+              margin-top: 10px;
+            }
+            
+            .thank-you {
+              color: #95a5a6;
+              font-size: 12px;
+              margin-top: 15px;
+              font-style: italic;
+            }
+            
+            @media print {
+              body {
+                background: white;
+                padding: 0;
+              }
+              .receipt {
+                box-shadow: none;
+                border-radius: 0;
+              }
+            }
           </style>
         </head>
         <body>
-          <h2>Чек продажи</h2>
-          <p><strong>Продавец:</strong> ${sale.seller_id}</p>
-          <p><strong>Товар:</strong> ${sale.product}</p>
-          <p><strong>Размер:</strong> ${sale.size}</p>
-          <p><strong>Количество:</strong> ${sale.quantity}</p>
-          <p><strong>Цена за единицу:</strong> ${sale.price} ₸</p>
-          <p class="total">Итого: ${parseFloat(sale.price) * sale.quantity} ₸</p>
-          <p><strong>Дата и время:</strong> ${new Date(sale.created_at).toLocaleString('ru-RU')}</p>
+          <div class="receipt">
+            <div class="header">
+              <div class="logo">qaraa.kz</div>
+              <div class="title">Чек продажи</div>
+            </div>
+            
+            <div class="info-row">
+              <span class="info-label">Продавец:</span>
+              <span class="info-value">${sale.seller_id}</span>
+            </div>
+            
+            <div class="product-section">
+              <div class="product-name">${sale.product}</div>
+              <div class="product-details">
+                <span>Размер: ${sale.size}</span>
+                <span>×${sale.quantity} шт.</span>
+              </div>
+              <div class="product-details" style="margin-top: 8px;">
+                <span>Цена за единицу:</span>
+                <span style="font-weight: 600;">${sale.price} ₸</span>
+              </div>
+            </div>
+            
+            <div class="total-section">
+              <div class="total">
+                <span class="total-label">Итого к оплате:</span>
+                <span class="total-amount">${parseFloat(sale.price) * sale.quantity} ₸</span>
+              </div>
+            </div>
+            
+            <div class="footer">
+              <div class="date">${new Date(sale.created_at).toLocaleString('ru-RU', {
+                day: '2-digit',
+                month: '2-digit', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}</div>
+              <div class="website">qaraa.kz</div>
+              <div class="thank-you">Спасибо за покупку!</div>
+            </div>
+          </div>
         </body>
       </html>
     `);
+    printWindow.document.close();
     printWindow.print();
   };
 

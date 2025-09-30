@@ -491,7 +491,7 @@ export default function Dashboard({ user, onLogout }) {
           </div>
         </div>
         
-        <div className="action-card">
+        {/* <div className="action-card">
           <div className="action-icon stats">
             <i className="fas fa-chart-bar"></i>
           </div>
@@ -502,7 +502,7 @@ export default function Dashboard({ user, onLogout }) {
               Открыть отчёты
             </button>
           </div>
-        </div>
+        </div> */}
       </div>
     </div>
   );
