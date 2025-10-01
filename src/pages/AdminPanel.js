@@ -2,11 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { saveAs } from "file-saver";
-import pdfMake from "pdfmake/build/pdfmake";
-import robotoFonts from "../fonts/vfs_fonts"; // 👈 твой файл
-
-pdfMake.vfs = robotoFonts.pdfMake.vfs;
 
 export default function AdminPanel({ onBack, user }) {
   const navigate = useNavigate();
@@ -23,10 +21,9 @@ export default function AdminPanel({ onBack, user }) {
     barcode: "",
     name: "",
     price: "",
-    sizes: { S: "", M: "", L: "" },
+    sizes: { S: "", M: "", L: "", XL: "" },
   });
 
-  // Проверка роли
   useEffect(() => {
     const fetchRole = async () => {
       if (!user) return;
@@ -52,14 +49,12 @@ export default function AdminPanel({ onBack, user }) {
     fetchRole();
   }, [user, navigate]);
 
-  // Загрузка данных по вкладкам
   useEffect(() => {
     if (activeTab === "sales") fetchSales();
     if (activeTab === "products") fetchProducts();
     if (activeTab === "добавить") resetForm();
   }, [activeTab]);
 
-  // Автоматическая проверка штрих-кода
   useEffect(() => {
     if (activeTab === "добавить" && step === "barcode" && form.barcode.trim()) {
       const timeout = setTimeout(() => {
@@ -68,8 +63,6 @@ export default function AdminPanel({ onBack, user }) {
       return () => clearTimeout(timeout);
     }
   }, [form.barcode, activeTab, step]);
-
-  // --- API функции ---
 
   async function fetchSales() {
     const { data, error } = await supabase
@@ -117,69 +110,38 @@ export default function AdminPanel({ onBack, user }) {
     }
   }
 
-  
-// Создаём PDF с поддержкой кириллицы
-
-function exportToPDF(data, title = "Отчет") {
-    const body = [
-      Object.keys(data[0]),
-      ...data.map(row => Object.values(row).map(v => String(v ?? "")))
-    ];
-  
-    const docDefinition = {
-      content: [
-        { text: title, style: "header" },
-        { table: { headerRows: 1, body } }
-      ],
-      styles: {
-        header: { fontSize: 18, bold: true, margin: [0, 0, 0, 10] }
-      },
-      defaultStyle: {
-        font: "Roboto"
-      }
-    };
-  
-    pdfMake.createPdf(docDefinition).download(`${title}.pdf`);
-  }
-
-  // Вынесенная функция для экспорта
   function exportToExcel(data, sheetName = "Sheet1", fileName = "data.xlsx") {
     if (!data || !data.length) return;
 
     const ws = XLSX.utils.json_to_sheet(data);
 
-// Автоширина колонок
-const cols = Object.keys(data[0]).map((key) => {
-    const maxLength = data.reduce((max, row) => {
-      const value = row[key] ? row[key].toString() : "";
-      return Math.max(max, value.length);
-    }, key.length);
-    return { wch: maxLength + 2 };
-  });
-  ws["!cols"] = cols;
+    const cols = Object.keys(data[0]).map((key) => {
+      const maxLength = data.reduce((max, row) => {
+        const value = row[key] ? row[key].toString() : "";
+        return Math.max(max, value.length);
+      }, key.length);
+      return { wch: maxLength + 2 };
+    });
+    ws["!cols"] = cols;
 
-// Центрирование колонок "Размер" и "Количество"
-const colKeys = Object.keys(sales[0]);
-const sizeColIndex = colKeys.indexOf("Размер");
-const qtyColIndex = colKeys.indexOf("Количество");
+    const colKeys = Object.keys(data[0]);
+    const sizeColIndex = colKeys.indexOf("Размер");
+    const qtyColIndex = colKeys.indexOf("Количество");
 
-Object.keys(ws).forEach((cell) => {
-  if (cell[0] === "!") return; // пропускаем служебные свойства
-  const col = XLSX.utils.decode_cell(cell).c;
-  if (col === sizeColIndex || col === qtyColIndex) {
-    ws[cell].s = {
-      alignment: { horizontal: "center", vertical: "center" }
-    };
+    Object.keys(ws).forEach((cell) => {
+      if (cell[0] === "!") return;
+      const col = XLSX.utils.decode_cell(cell).c;
+      if (col === sizeColIndex || col === qtyColIndex) {
+        ws[cell].s = { alignment: { horizontal: "center", vertical: "center" } };
+      }
+    });
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
+    saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
   }
-});
-  
-const wb = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(wb, ws, sheetName);
-const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
-saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
-}
-  
-  // Использование внутри компонента
+
   function handleExportSales() {
     const salesData = sales.map(s => ({
       "ID": s.id ?? "",
@@ -193,7 +155,33 @@ saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
     }));
     exportToExcel(salesData, "Продажи", "sales.xlsx");
   }
-  
+
+  function handleExportSalesPDF() {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const tableColumn = ["ID", "Продавец", "Товар", "Штрихкод", "Размер", "Кол-во", "Цена", "Дата"];
+    const tableRows = sales.map((s) => [
+      s.id ?? "",
+      s.seller_id ?? "",
+      s.product ?? "",
+      s.barcode ?? "",
+      s.size ?? "",
+      s.quantity ?? 0,
+      s.price ?? 0,
+      s.created_at ? new Date(s.created_at).toLocaleString("ru-RU") : ""
+    ]);
+
+    doc.setFontSize(14);
+    doc.text("Отчет по продажам", 14, 16);
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 20,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [51, 51, 51] }
+    });
+    doc.save("sales.pdf");
+  }
+
   function handleExportProducts() {
     const productsData = [];
     products.forEach(p => {
@@ -209,6 +197,35 @@ saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
       });
     });
     exportToExcel(productsData, "Товары", "products.xlsx");
+  }
+
+  function handleExportProductsPDF() {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const tableColumn = ["ID", "Название", "Штрихкод", "Размер", "Остаток", "Цена"];
+    const tableRows = [];
+    products.forEach((p) => {
+      p.product_variants.forEach((v) => {
+        tableRows.push([
+          p.id ?? "",
+          p.name ?? "",
+          p.barcode ?? "",
+          v.size ?? "",
+          v.quantity ?? 0,
+          v.price ?? 0,
+        ]);
+      });
+    });
+
+    doc.setFontSize(14);
+    doc.text("Список товаров", 14, 16);
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 20,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [51, 51, 51] }
+    });
+    doc.save("products.pdf");
   }
 
   async function registerProduct() {
@@ -253,493 +270,436 @@ saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
             .eq("id", existing.id);
         } else {
           await supabase.from("product_variants").insert([
-            {
-              product_id: foundProduct.id,
-              size,
-              quantity,
-              price: parseFloat(form.price),
-            },
+            { product_id: foundProduct.id, size, quantity, price: parseFloat(form.price) }
           ]);
         }
       }
     }
 
-    // 🔥 Автообновление данных после добавления
     await fetchProducts();
     await fetchSales();
 
     resetForm();
-    setActiveTab("products"); // после добавления возвращаем к списку товаров
+    setActiveTab("products");
   }
 
   function resetForm() {
-    setForm({ barcode: "", name: "", price: "", sizes: { S: "", M: "", L: "" } });
+    setForm({ barcode: "", name: "", price: "", sizes: { S: "", M: "", L: "", XL: "" } });
     setStep("barcode");
     setFoundProduct(null);
   }
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(to bottom right, #f8fafc, #e2e8f0)',
-      padding: '1.5rem'
-    }}>
-      <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
-        {/* Header */}
-        <div style={{
-          background: 'white',
-          borderRadius: '1rem',
-          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-          padding: '1.5rem',
-          marginBottom: '1.5rem'
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '1rem'
-          }}>
-            <h1 style={{
-              fontSize: '1.875rem',
-              fontWeight: 'bold',
-              background: 'linear-gradient(to right, #2563eb, #9333ea)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text'
-            }}>
-              Админ-панель
-            </h1>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button 
-  onClick={resetForm}   // только сброс формы
-  style={{
-    padding: '0.5rem 1rem',
-    background: '#f3f4f6',
-    color: '#374151',
-    borderRadius: '0.5rem',
-    border: 'none',
-    fontWeight: '500',
-    cursor: 'pointer',
-    transition: 'all 0.2s'
-  }}
-  onMouseOver={(e) => e.target.style.background = '#e5e7eb'}
-  onMouseOut={(e) => e.target.style.background = '#f3f4f6'}
->
-  ← Очистить форму
-</button>
-              <button 
-                onClick={() => navigate('/dashboard')} 
-                disabled={isLoading}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: 'linear-gradient(to right, #3b82f6, #2563eb)',
-                  color: 'white',
-                  borderRadius: '0.5rem',
-                  border: 'none',
-                  fontWeight: '500',
-                  cursor: isLoading ? 'not-allowed' : 'pointer',
-                  opacity: isLoading ? 0.5 : 1,
-                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  transition: 'all 0.2s'
-                }}
-                onMouseOver={(e) => {
-                  if (!isLoading) {
-                    e.target.style.background = 'linear-gradient(to right, #2563eb, #1d4ed8)';
-                    e.target.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)';
-                  }
-                }}
-                onMouseOut={(e) => {
-                  e.target.style.background = 'linear-gradient(to right, #3b82f6, #2563eb)';
-                  e.target.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-                }}
+    <>
+      <style>{`
+        *, *::before, *::after { box-sizing: border-box; }
+        :root {
+          --bg: #fafafa;
+          --card: #ffffff;
+          --text: #333;
+          --muted: #888;
+          --border: #e0e0e0;
+          --dark: #333;
+          --success: #2ecc71;
+          --danger: #db4437;
+          --accent: #555;
+        }
+
+        .admin-root {
+          min-height: 100vh;
+          background: var(--bg);
+          padding: 24px;
+        }
+
+        .container {
+          max-width: 1200px;
+          margin: 0 auto;
+          width: 100%;
+        }
+
+        .header-card, .content-card {
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+        }
+
+        .header-card {
+          padding: 16px;
+          margin-bottom: 16px;
+        }
+
+        .header-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .title {
+          margin: 0;
+          font-size: 24px;
+          font-weight: 600;
+          color: var(--text);
+        }
+
+        .btn {
+          padding: 10px 16px;
+          border-radius: 6px;
+          border: 1px solid var(--border);
+          background: #fff;
+          color: var(--text);
+          cursor: pointer;
+          font-size: 14px;
+          transition: all .2s;
+        }
+
+        .btn:hover {
+          background: #f5f5f5;
+          border-color: #bbb;
+        }
+
+        .btn-dark {
+          background: var(--dark);
+          color: #fff;
+          border: none;
+        }
+        .btn-dark:hover { background: var(--accent); }
+
+        .btn-success {
+          background: var(--success);
+          color: #fff;
+          border: none;
+        }
+        .btn-success:hover { background: #27ae60; }
+
+        .btn-danger {
+          background: #fff;
+          color: var(--danger);
+          border: 1px solid #f0c3bf;
+        }
+        .btn-danger:hover {
+          background: #fdecea;
+          border-color: #f1a199;
+        }
+
+        .tabs {
+          display: flex;
+          gap: 8px;
+          margin-top: 12px;
+          border-bottom: 1px solid var(--border);
+          padding-bottom: 8px;
+        }
+
+        .tab {
+          padding: 10px 16px;
+          border: none;
+          background: transparent;
+          color: var(--muted);
+          cursor: pointer;
+          border-radius: 6px;
+          transition: all .2s;
+        }
+
+        .tab:hover { background: #f5f5f5; color: var(--text); }
+
+        .tab.active {
+          background: var(--dark);
+          color: #fff;
+        }
+
+        .content-card {
+          padding: 16px;
+        }
+
+        .section-title {
+          font-size: 18px;
+          font-weight: 600;
+          color: var(--text);
+          margin: 0 0 16px 0;
+        }
+
+        .toolbar {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 12px;
+        }
+
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        thead th {
+          padding: 12px 14px;
+          text-align: left;
+          font-size: 12px;
+          color: var(--muted);
+          text-transform: uppercase;
+          border-bottom: 1px solid var(--border);
+          background: #fafafa;
+        }
+        tbody td {
+          padding: 12px 14px;
+          font-size: 14px;
+          color: var(--text);
+          border-bottom: 1px solid var(--border);
+        }
+
+        .badge {
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 12px;
+          display: inline-block;
+        }
+
+        .input, .select {
+          width: 100%;
+          padding: 12px 14px;
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          font-size: 14px;
+          background: #fff;
+          color: var(--text);
+          max-width: 100%;
+        }
+
+        .flow-card {
+          background: #fff;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 16px;
+          width: 100%;
+          max-width: 480px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .flow-step {
+          text-align: center;
+          margin-bottom: 16px;
+          color: var(--muted);
+        }
+
+        .row { display: flex; gap: 12px; }
+        .col { flex: 1; }
+
+        footer.simple {
+          text-align: center;
+          padding: 12px;
+          font-size: 13px;
+          color: #666;
+          border-top: 1px solid #ddd;
+          background: #f9f9f9;
+          margin-top: 16px;
+          border-radius: 6px;
+        }
+
+        @media (max-width: 600px) {
+          .admin-root { padding: 12px; }
+          .header-card { padding: 12px; }
+          .content-card { padding: 12px; }
+          .title { font-size: 20px; }
+          .toolbar { flex-direction: column; }
+          .btn { width: 100%; }
+          .row { flex-direction: column; }
+          .flow-step div[style] { margin-bottom: 6px; }
+          thead th { font-size: 11px; padding: 10px; }
+          tbody td { font-size: 13px; padding: 10px; }
+          .flow-card { padding: 12px; max-width: 100%; }
+          .tabs { gap: 6px; }
+          .tab { padding: 8px 12px; }
+        }
+      `}</style>
+
+      <div className="admin-root">
+        <div className="container">
+          <div className="header-card">
+            <div className="header-row">
+              <h1 className="title">Админ-панель</h1>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={resetForm}
+                  className="btn"
+                >
+                  ← Очистить форму
+                </button>
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  disabled={isLoading}
+                  className="btn btn-dark"
+                >
+                  🏠 На главную
+                </button>
+              </div>
+            </div>
+
+            <div className="tabs">
+              <button
+                className={`tab ${activeTab === "sales" ? "active" : ""}`}
+                onClick={() => setActiveTab("sales")}
               >
-                🏠 На главную
+                📊 Продажи
+              </button>
+              <button
+                className={`tab ${activeTab === "products" ? "active" : ""}`}
+                onClick={() => setActiveTab("products")}
+              >
+                📦 Товары
+              </button>
+              <button
+                className={`tab ${activeTab === "добавить" ? "active" : ""}`}
+                onClick={() => setActiveTab("добавить")}
+              >
+                ➕ Добавить
               </button>
             </div>
           </div>
 
-          {/* Tabs */}
-          <div style={{
-            display: 'flex',
-            gap: '0.5rem',
-            marginTop: '1.5rem',
-            borderBottom: '1px solid #e5e7eb'
-          }}>
-            <button
-              onClick={() => setActiveTab("sales")}
-              style={{
-                padding: '0.75rem 1.5rem',
-                fontWeight: '500',
-                background: 'none',
-                border: 'none',
-                borderBottom: activeTab === "sales" ? '2px solid #3b82f6' : '2px solid transparent',
-                color: activeTab === "sales" ? '#2563eb' : '#6b7280',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              📊 Продажи
-            </button>
-            <button
-              onClick={() => setActiveTab("products")}
-              style={{
-                padding: '0.75rem 1.5rem',
-                fontWeight: '500',
-                background: 'none',
-                border: 'none',
-                borderBottom: activeTab === "products" ? '2px solid #3b82f6' : '2px solid transparent',
-                color: activeTab === "products" ? '#2563eb' : '#6b7280',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              📦 Товары
-            </button>
-            <button
-              onClick={() => setActiveTab("добавить")}
-              style={{
-                padding: '0.75rem 1.5rem',
-                fontWeight: '500',
-                background: 'none',
-                border: 'none',
-                borderBottom: activeTab === "добавить" ? '2px solid #3b82f6' : '2px solid transparent',
-                color: activeTab === "добавить" ? '#2563eb' : '#6b7280',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-            >
-              ➕ Добавить
-            </button>
-          </div>
-        </div>
+          <div className="content-card">
+            <div className="toolbar">
+              {activeTab === "sales" && (
+                <>
+                  <button onClick={handleExportSales} className="btn btn-dark">💾 Excel (Продажи)</button>
+                </>
+              )}
+              {activeTab === "products" && (
+                <>
+                  <button onClick={handleExportProducts} className="btn btn-dark">💾 Excel (Товары)</button>
+                </>
+              )}
+            </div>
 
-        {/* Content */}
-        <div style={{
-          background: 'white',
-          borderRadius: '1rem',
-          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
-          padding: '1.5rem'
-        }}>
-            {/* Кнопки Excel */}
-<div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
-  {activeTab === "sales" && (
-    <>
-      <button
-        onClick={handleExportSales}
-        style={{
-          padding: '0.5rem 1rem',
-          background: '#3b82f6',
-          color: 'white',
-          borderRadius: '0.5rem',
-          border: 'none',
-          cursor: 'pointer'
-        }}
-      >
-        💾 Excel (Продажи)
-      </button>
-
-      <button
-        onClick={() => exportToPDF(sales, "Продажи")}
-        style={{
-          padding: '0.5rem 1rem',
-          background: '#ef4444',
-          color: 'white',
-          borderRadius: '0.5rem',
-          border: 'none',
-          cursor: 'pointer'
-        }}
-      >
-        📄 PDF (Продажи)
-      </button>
-    </>
-  )}
-
-  {activeTab === "products" && (
-    <>
-      <button
-        onClick={handleExportProducts}
-        style={{
-          padding: '0.5rem 1rem',
-          background: '#3b82f6',
-          color: 'white',
-          borderRadius: '0.5rem',
-          border: 'none',
-          cursor: 'pointer'
-        }}
-      >
-        💾 Excel (Товары)
-      </button>
-
-      <button
-        onClick={() => exportToPDF(products.flatMap(p =>
-          p.product_variants.map(v => ({
-            ID: p.id,
-            Название: p.name,
-            Штрихкод: p.barcode,
-            Размер: v.size,
-            Остаток: v.quantity,
-            Цена: v.price,
-          }))
-        ), "Товары")}
-        style={{
-          padding: '0.5rem 1rem',
-          background: '#ef4444',
-          color: 'white',
-          borderRadius: '0.5rem',
-          border: 'none',
-          cursor: 'pointer'
-        }}
-      >
-        📄 PDF (Товары)
-      </button>
-    </>
-  )}
-</div>
-
-          {activeTab === "sales" && (
-            <div>
-              <h2 style={{
-                fontSize: '1.5rem',
-                fontWeight: 'bold',
-                color: '#1f2937',
-                marginBottom: '1.5rem'
-              }}>
-                📊 История продаж
-              </h2>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: 'linear-gradient(to right, #eff6ff, #faf5ff)' }}>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>ID</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Продавец</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Товар</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Штрих-код</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Размер</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Кол-во</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Цена</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Дата</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sales.map((s) => (
-                      <tr key={s.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4b5563' }}>{s.id}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#1f2937' }}>{s.seller_id}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#1f2937', fontWeight: '500' }}>{s.product}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4b5563', fontFamily: 'monospace' }}>{s.barcode}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
-                          <span style={{
-                            padding: '0.25rem 0.5rem',
-                            background: '#dbeafe',
-                            color: '#1e40af',
-                            borderRadius: '0.375rem',
-                            fontSize: '0.75rem',
-                            fontWeight: '500'
-                          }}>
-                            {s.size}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#1f2937' }}>{s.quantity}</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: '600', color: '#059669' }}>{s.price} ₸</td>
-                        <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4b5563' }}>
-                          {new Date(s.created_at).toLocaleString('ru-RU')}
-                        </td>
+            {activeTab === "sales" && (
+              <div>
+                <h2 className="section-title">📊 История продаж</h2>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Продавец</th>
+                        <th>Товар</th>
+                        <th>Штрих-код</th>
+                        <th>Размер</th>
+                        <th>Кол-во</th>
+                        <th>Цена</th>
+                        <th>Дата</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "products" && (
-            <div>
-              <h2 style={{
-                fontSize: '1.5rem',
-                fontWeight: 'bold',
-                color: '#1f2937',
-                marginBottom: '1.5rem'
-              }}>
-                📦 Список товаров
-              </h2>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: 'linear-gradient(to right, #eff6ff, #faf5ff)' }}>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>ID</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Название</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Штрих-код</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Размер</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Остаток</th>
-                      <th style={{ padding: '0.75rem 1rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>Цена</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {products.map((p) =>
-                      p.product_variants.map((v) => (
-                        <tr key={v.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4b5563' }}>{p.id}</td>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#1f2937', fontWeight: '500' }}>{p.name}</td>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', color: '#4b5563', fontFamily: 'monospace' }}>{p.barcode}</td>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
-                            <span style={{
-                              padding: '0.25rem 0.5rem',
-                              background: '#f3e8ff',
-                              color: '#6b21a8',
-                              borderRadius: '0.375rem',
-                              fontSize: '0.75rem',
-                              fontWeight: '500'
-                            }}>
-                              {v.size}
-                            </span>
+                    </thead>
+                    <tbody>
+                      {sales.map((s) => (
+                        <tr key={s.id}>
+                          <td>{s.id}</td>
+                          <td>{s.seller_id}</td>
+                          <td style={{ fontWeight: 500 }}>{s.product}</td>
+                          <td style={{ fontFamily: 'monospace' }}>{s.barcode}</td>
+                          <td>
+                            <span className="badge" style={{ background: '#f5f5f5', color: '#555' }}>{s.size}</span>
                           </td>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem' }}>
-                            <span style={{
-                              padding: '0.25rem 0.5rem',
-                              background: v.quantity > 10 ? '#d1fae5' : v.quantity > 0 ? '#fef3c7' : '#fee2e2',
-                              color: v.quantity > 10 ? '#065f46' : v.quantity > 0 ? '#92400e' : '#991b1b',
-                              borderRadius: '0.375rem',
-                              fontSize: '0.75rem',
-                              fontWeight: '500'
-                            }}>
-                              {v.quantity} шт
-                            </span>
-                          </td>
-                          <td style={{ padding: '0.75rem 1rem', fontSize: '0.875rem', fontWeight: '600', color: '#059669' }}>{v.price} ₸</td>
+                          <td>{s.quantity}</td>
+                          <td style={{ color: '#059669', fontWeight: 600 }}>{s.price} ₸</td>
+                          <td>{new Date(s.created_at).toLocaleString('ru-RU')}</td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {activeTab === "добавить" && (
-            <div>
-              <h2 style={{
-                fontSize: '1.5rem',
-                fontWeight: 'bold',
-                color: '#1f2937',
-                marginBottom: '1.5rem'
-              }}>
-                ➕ Добавить товар
-              </h2>
+            {activeTab === "products" && (
+              <div>
+                <h2 className="section-title">📦 Список товаров</h2>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Название</th>
+                        <th>Штрих-код</th>
+                        <th>Размер</th>
+                        <th>Остаток</th>
+                        <th>Цена</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {products.map((p) =>
+                        p.product_variants.map((v) => (
+                          <tr key={v.id}>
+                            <td>{p.id}</td>
+                            <td style={{ fontWeight: 500 }}>{p.name}</td>
+                            <td style={{ fontFamily: 'monospace' }}>{p.barcode}</td>
+                            <td>
+                              <span className="badge" style={{ background: '#f5f5f5', color: '#555' }}>{v.size}</span>
+                            </td>
+                            <td>
+                              <span
+                                className="badge"
+                                style={{
+                                  background: v.quantity > 10 ? '#eaf7f0' : v.quantity > 0 ? '#fff7e6' : '#fdecea',
+                                  color: v.quantity > 10 ? '#1e7e34' : v.quantity > 0 ? '#8a5a00' : '#b72b22'
+                                }}
+                              >
+                                {v.quantity} шт
+                              </span>
+                            </td>
+                            <td style={{ color: '#059669', fontWeight: 600 }}>{v.price} ₸</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
-              {step === "barcode" && (
-                <div style={{ maxWidth: '28rem', margin: '0 auto' }}>
-                  <div style={{
-                    background: 'linear-gradient(to bottom right, #eff6ff, #faf5ff)',
-                    borderRadius: '0.75rem',
-                    padding: '2rem',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                  }}>
-                    <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            {activeTab === "добавить" && (
+              <div>
+                <h2 className="section-title">➕ Добавить товар</h2>
+
+                {step === "barcode" && (
+                  <div className="flow-card" style={{ maxWidth: 480, margin: '0 auto' }}>
+                    <div className="flow-step">
                       <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '4rem',
-                        height: '4rem',
-                        background: '#dbeafe',
-                        borderRadius: '9999px',
-                        marginBottom: '1rem'
+                        width: 48, height: 48, borderRadius: 8,
+                        background: '#f5f5f5', display: 'inline-flex',
+                        alignItems: 'center', justifyContent: 'center', marginBottom: 8
                       }}>
-                        <span style={{ fontSize: '1.875rem' }}>🔍</span>
+                        <span>🔍</span>
                       </div>
-                      <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1f2937' }}>
-                        Сканируйте товар
-                      </h3>
-                      <p style={{ color: '#4b5563', marginTop: '0.5rem' }}>
-                        Введите или отсканируйте штрих-код
-                      </p>
+                      <div style={{ fontWeight: 600, color: '#333' }}>Сканируйте товар</div>
+                      <div style={{ color: '#888', fontSize: 13 }}>Введите или отсканируйте штрих-код</div>
                     </div>
+
                     <input
                       type="text"
                       placeholder="Штрих-код товара"
                       value={form.barcode}
                       onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem 1rem',
-                        border: '2px solid #d1d5db',
-                        borderRadius: '0.5rem',
-                        textAlign: 'center',
-                        fontSize: '1.125rem',
-                        fontFamily: 'monospace',
-                        marginBottom: '1rem',
-                        boxSizing: 'border-box'
-                      }}
-                      onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
-                      onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                      className="input"
+                      style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 16, marginBottom: 8 }}
                     />
-                    <button 
-                      onClick={checkBarcode}
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem 1.5rem',
-                        background: 'linear-gradient(to right, #3b82f6, #2563eb)',
-                        color: 'white',
-                        borderRadius: '0.5rem',
-                        border: 'none',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                        transition: 'all 0.2s'
-                      }}
-                      onMouseOver={(e) => {
-                        e.target.style.background = 'linear-gradient(to right, #2563eb, #1d4ed8)';
-                        e.target.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)';
-                      }}
-                      onMouseOut={(e) => {
-                        e.target.style.background = 'linear-gradient(to right, #3b82f6, #2563eb)';
-                        e.target.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-                      }}
-                    >
+                    <button onClick={checkBarcode} className="btn btn-dark" style={{ width: '100%' }}>
                       Проверить наличие
                     </button>
                   </div>
-                </div>
-              )}
+                )}
 
-              {step === "details" && (
-                <div style={{ maxWidth: '28rem', margin: '0 auto' }}>
-                  <div style={{
-                    background: 'linear-gradient(to bottom right, #d1fae5, #a7f3d0)',
-                    borderRadius: '0.75rem',
-                    padding: '2rem',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                  }}>
-                    <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                {step === "details" && (
+                  <div className="flow-card" style={{ maxWidth: 480, margin: '0 auto' }}>
+                    <div className="flow-step">
                       <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '4rem',
-                        height: '4rem',
-                        background: '#d1fae5',
-                        borderRadius: '9999px',
-                        marginBottom: '1rem'
+                        width: 48, height: 48, borderRadius: 8,
+                        background: '#f5f5f5', display: 'inline-flex',
+                        alignItems: 'center', justifyContent: 'center', marginBottom: 8
                       }}>
-                        <span style={{ fontSize: '1.875rem' }}>📝</span>
+                        <span>📝</span>
                       </div>
-                      <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1f2937' }}>
-                        Новый товар
-                      </h3>
-                      <p style={{ color: '#4b5563', marginTop: '0.5rem' }}>
-                        Товар не найден, добавьте информацию
-                      </p>
+                      <div style={{ fontWeight: 600, color: '#333' }}>Новый товар</div>
+                      <div style={{ color: '#888', fontSize: 13 }}>Товар не найден, добавьте информацию</div>
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+                    <div className="col" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '0.875rem',
-                          fontWeight: '500',
-                          color: '#374151',
-                          marginBottom: '0.5rem'
-                        }}>
+                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6 }}>
                           Название товара
                         </label>
                         <input
@@ -747,25 +707,11 @@ saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
                           placeholder="Например: Футболка Nike"
                           value={form.name}
                           onChange={(e) => setForm({ ...form, name: e.target.value })}
-                          style={{
-                            width: '100%',
-                            padding: '0.75rem 1rem',
-                            border: '2px solid #d1d5db',
-                            borderRadius: '0.5rem',
-                            boxSizing: 'border-box'
-                          }}
-                          onFocus={(e) => e.target.style.borderColor = '#10b981'}
-                          onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                          className="input"
                         />
                       </div>
                       <div>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '0.875rem',
-                          fontWeight: '500',
-                          color: '#374151',
-                          marginBottom: '0.5rem'
-                        }}>
+                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6 }}>
                           Цена (₸)
                         </label>
                         <input
@@ -773,314 +719,119 @@ saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
                           placeholder="0"
                           value={form.price}
                           onChange={(e) => setForm({ ...form, price: e.target.value })}
-                          style={{
-                            width: '100%',
-                            padding: '0.75rem 1rem',
-                            border: '2px solid #d1d5db',
-                            borderRadius: '0.5rem',
-                            boxSizing: 'border-box'
-                          }}
-                          onFocus={(e) => e.target.style.borderColor = '#10b981'}
-                          onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                          className="input"
                         />
                       </div>
-                      <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem' }}>
-                        <button 
-                          onClick={registerProduct}
-                          style={{
-                            flex: 1,
-                            padding: '0.75rem 1.5rem',
-                            background: 'linear-gradient(to right, #10b981, #059669)',
-                            color: 'white',
-                            borderRadius: '0.5rem',
-                            border: 'none',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                            transition: 'all 0.2s'
-                          }}
-                          onMouseOver={(e) => {
-                            e.target.style.background = 'linear-gradient(to right, #059669, #047857)';
-                            e.target.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)';
-                          }}
-                          onMouseOut={(e) => {
-                            e.target.style.background = 'linear-gradient(to right, #10b981, #059669)';
-                            e.target.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-                          }}
-                        >
+                      <div className="row" style={{ gap: 8 }}>
+                        <button onClick={registerProduct} className="btn btn-success" style={{ flex: 1 }}>
                           Сохранить
                         </button>
-                        <button 
-                          onClick={resetForm}
-                          style={{
-                            padding: '0.75rem 1.5rem',
-                            background: '#e5e7eb',
-                            color: '#374151',
-                            borderRadius: '0.5rem',
-                            border: 'none',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                          }}
-                          onMouseOver={(e) => e.target.style.background = '#d1d5db'}
-                          onMouseOut={(e) => e.target.style.background = '#e5e7eb'}
-                        >
-                          Отмена
-                        </button>
+                        <button onClick={resetForm} className="btn">Отмена</button>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {step === "stock" && (
-                <div style={{ maxWidth: '28rem', margin: '0 auto' }}>
-                  <div style={{
-                    background: 'linear-gradient(to bottom right, #faf5ff, #fce7f3)',
-                    borderRadius: '0.75rem',
-                    padding: '2rem',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-                  }}>
-                    <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                {step === "stock" && (
+                  <div className="flow-card" style={{ maxWidth: 480, margin: '0 auto' }}>
+                    <div className="flow-step">
                       <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: '4rem',
-                        height: '4rem',
-                        background: '#f3e8ff',
-                        borderRadius: '9999px',
-                        marginBottom: '1rem'
+                        width: 48, height: 48, borderRadius: 8,
+                        background: '#f5f5f5', display: 'inline-flex',
+                        alignItems: 'center', justifyContent: 'center', marginBottom: 8
                       }}>
-                        <span style={{ fontSize: '1.875rem' }}>📦</span>
+                        <span>📦</span>
                       </div>
-                      <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1f2937' }}>
-                        {foundProduct?.name}
-                      </h3>
-                      <p style={{ color: '#4b5563', marginTop: '0.5rem', fontFamily: 'monospace' }}>
-                        {form.barcode}
-                      </p>
+                      <div style={{ fontWeight: 600, color: '#333' }}>{foundProduct?.name}</div>
+                      <div style={{ color: '#888', fontSize: 13, fontFamily: 'monospace' }}>{form.barcode}</div>
                     </div>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '0.875rem',
-                          fontWeight: '500',
-                          color: '#374151',
-                          marginBottom: '0.5rem'
-                        }}>
+                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6 }}>
                           Цена (₸)
                         </label>
                         <input
                           type="number"
                           value={form.price}
                           onChange={(e) => setForm({ ...form, price: e.target.value })}
-                          style={{
-                            width: '100%',
-                            padding: '0.75rem 1rem',
-                            border: '2px solid #d1d5db',
-                            borderRadius: '0.5rem',
-                            boxSizing: 'border-box'
-                          }}
-                          onFocus={(e) => e.target.style.borderColor = '#a855f7'}
-                          onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
+                          className="input"
                         />
                       </div>
 
                       <div>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '0.875rem',
-                          fontWeight: '500',
-                          color: '#374151',
-                          marginBottom: '0.75rem'
-                        }}>
+                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 8 }}>
                           Количество по размерам
                         </label>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{
-                              width: '3rem',
-                              height: '3rem',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: '#f3e8ff',
-                              color: '#6b21a8',
-                              borderRadius: '0.5rem',
-                              fontWeight: 'bold'
-                            }}>
-                              S
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={form.sizes.S}
-                              onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, S: e.target.value } })}
-                              style={{
-                                flex: 1,
-                                padding: '0.75rem 1rem',
-                                border: '2px solid #d1d5db',
-                                borderRadius: '0.5rem',
-                                boxSizing: 'border-box'
-                              }}
-                              placeholder="0"
-                              onFocus={(e) => e.target.style.borderColor = '#a855f7'}
-                              onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-                            />
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{
-                              width: '3rem',
-                              height: '3rem',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: '#f3e8ff',
-                              color: '#6b21a8',
-                              borderRadius: '0.5rem',
-                              fontWeight: 'bold'
-                            }}>
-                              M
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={form.sizes.M}
-                              onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, M: e.target.value } })}
-                              style={{
-                                flex: 1,
-                                padding: '0.75rem 1rem',
-                                border: '2px solid #d1d5db',
-                                borderRadius: '0.5rem',
-                                boxSizing: 'border-box'
-                              }}
-                              placeholder="0"
-                              onFocus={(e) => e.target.style.borderColor = '#a855f7'}
-                              onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-                            />
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{
-                              width: '3rem',
-                              height: '3rem',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: '#f3e8ff',
-                              color: '#6b21a8',
-                              borderRadius: '0.5rem',
-                              fontWeight: 'bold'
-                            }}>
-                              L
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={form.sizes.L}
-                              onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, L: e.target.value } })}
-                              style={{
-                                flex: 1,
-                                padding: '0.75rem 1rem',
-                                border: '2px solid #d1d5db',
-                                borderRadius: '0.5rem',
-                                boxSizing: 'border-box'
-                              }}
-                              placeholder="0"
-                              onFocus={(e) => e.target.style.borderColor = '#a855f7'}
-                              onBlur={(e) => e.target.style.borderColor = '#d1d5db'}
-                            />
-                          </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>S</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={form.sizes.S}
+                            onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, S: e.target.value } })}
+                            className="input"
+                          />
                         </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                          <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>M</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={form.sizes.M}
+                            onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, M: e.target.value } })}
+                            className="input"
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                          <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>L</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={form.sizes.L}
+                            onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, L: e.target.value } })}
+                            className="input"
+                          />
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+  <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>XL</span>
+  <input
+    type="number"
+    min="0"
+    step="1"
+    value={form.sizes.XL}
+    onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, XL: e.target.value } })}
+    className="input"
+  />
+</div>
                       </div>
 
-                      // Оборачиваем таблицу в контейнер для скролла
-<div style={{ overflowX: 'auto', width: '100%' }}>
-  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-    <thead>
-      <tr>
-        <th>Продавец</th>
-        <th>Товар</th>
-        <th>Штрихкод</th>
-        <th>Размер</th>
-        <th>Количество</th>
-        <th>Цена</th>
-        <th>Дата</th>
-      </tr>
-    </thead>
-    <tbody>
-      {sales.map((sale) => (
-        <tr key={sale.id}>
-          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{sale.seller}</td>
-          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{sale.product}</td>
-          <td style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{sale.barcode}</td>
-          <td>{sale.size}</td>
-          <td>{sale.quantity}</td>
-          <td>{sale.price}</td>
-          <td>{sale.date}</td>
-        </tr>
-      ))}
-    </tbody>
-  </table>
-</div>
-
-                      <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem' }}>
-                        <button 
-                          onClick={addStock}
-                          style={{
-                            flex: 1,
-                            padding: '0.75rem 1.5rem',
-                            background: 'linear-gradient(to right, #a855f7, #9333ea)',
-                            color: 'white',
-                            borderRadius: '0.5rem',
-                            border: 'none',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                            transition: 'all 0.2s'
-                          }}
-                          onMouseOver={(e) => {
-                            e.target.style.background = 'linear-gradient(to right, #9333ea, #7e22ce)';
-                            e.target.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)';
-                          }}
-                          onMouseOut={(e) => {
-                            e.target.style.background = 'linear-gradient(to right, #a855f7, #9333ea)';
-                            e.target.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
-                          }}
-                        >
+                      <div className="row" style={{ paddingTop: 8 }}>
+                        <button onClick={addStock} className="btn btn-dark" style={{ flex: 1 }}>
                           Добавить на склад
                         </button>
-                        <button 
-                          onClick={resetForm}
-                          style={{
-                            padding: '0.75rem 1.5rem',
-                            background: '#e5e7eb',
-                            color: '#374151',
-                            borderRadius: '0.5rem',
-                            border: 'none',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s'
-                          }}
-                          onMouseOver={(e) => e.target.style.background = '#d1d5db'}
-                          onMouseOut={(e) => e.target.style.background = '#e5e7eb'}
-                        >
-                          Отмена
-                        </button>
+                        <button onClick={resetForm} className="btn">Отмена</button>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
+
+          <footer className="simple">
+            © qaraa.kz | Система безопасного доступа, 2025. <br />
+            Последнее обновление: 02.10.2025 | srk.
+          </footer>
         </div>
       </div>
-    </div>
+    </>
   );
 }

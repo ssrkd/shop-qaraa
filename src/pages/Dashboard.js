@@ -34,29 +34,21 @@ export default function Dashboard({ user, onLogout }) {
     if (error) {
       console.error(error);
     } else {
-      setSalesToday(data.length); // количество продаж
+      setSalesToday(data.length);
     }
   }
 
   useEffect(() => {
-    fetchSalesToday(); // начальная загрузка
+    fetchSalesToday();
   
-    // создаём канал для подписки
     const salesChannel = supabase
-      .channel('public:sales') // любое уникальное имя канала
+      .channel('public:sales')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'sales' },
         (payload) => {
-          const saleDate = new Date(payload.new.created_at);
-          const today = new Date();
-          if (
-            saleDate.getFullYear() === today.getFullYear() &&
-            saleDate.getMonth() === today.getMonth() &&
-            saleDate.getDate() === today.getDate()
-          ) {
-            setSalesToday(prev => prev + 1);
-          }
+          // Recalculate using server time boundaries to avoid timezone drift
+          fetchSalesToday();
         }
       )
       .subscribe();
@@ -67,24 +59,20 @@ export default function Dashboard({ user, onLogout }) {
   }, []);
 
   useEffect(() => {
-    // обновляем время каждую секунду
     const interval = setInterval(() => {
       setCurrentTime(new Date());
     }, 1000);
 
-    return () => clearInterval(interval); // чистим, чтобы не было утечек
+    return () => clearInterval(interval);
   }, []);
 
-  // форматирование времени (часы:минуты:секунды)
   const formatTime = (date) => {
     return date.toLocaleTimeString("ru-RU", { hour12: false });
   };
 
-  // === EFFECT ДЛЯ OWNER ===
   useEffect(() => {
     let interval;
     
-
     const fetchSales = async () => {
       const { data, error } = await supabase
         .from('sales')
@@ -126,10 +114,12 @@ export default function Dashboard({ user, onLogout }) {
       fetchSellers();
       fetchLogs();
       fetchSales();
+      fetchSalesToday();
       interval = setInterval(() => {
         fetchSellers();
         fetchLogs();
         fetchSales();
+        fetchSalesToday();
       }, 5000);
     }
 
@@ -139,7 +129,6 @@ export default function Dashboard({ user, onLogout }) {
     };
   }, [user]);
 
-  // === Функции ===
   const markOnline = async (id, status) => {
     const { error } = await supabase.from('login').update({ is_online: status }).eq('id', id);
     if (error) console.error('Ошибка при обновлении статуса онлайн:', error);
@@ -190,7 +179,6 @@ export default function Dashboard({ user, onLogout }) {
     else setLogs(data);
   };
 
-  // === ЛОГИН ПРИ ВХОДЕ (только один раз) ===
   useEffect(() => {
     const logLogin = async () => {
       if (!user) return;
@@ -227,33 +215,32 @@ export default function Dashboard({ user, onLogout }) {
     if (doFetch) fetchLogs();
   };
 
-  // === КОМПОНЕНТЫ ===
   const OverviewTab = () => (
     <div className="overview-content">
       <div className="stats-container">
         <div className="stat-card">
-          <div className="stat-icon users"><i className="fas fa-users"></i></div>
+          <div className="stat-icon"><i className="fas fa-users"></i></div>
           <div className="stat-info">
             <div className="stat-number">{sellers.length}</div>
             <div className="stat-label">Всего продавцов</div>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon online"><i className="fas fa-user-check"></i></div>
+          <div className="stat-icon"><i className="fas fa-user-check"></i></div>
           <div className="stat-info">
             <div className="stat-number">{onlineSellers.length}</div>
             <div className="stat-label">В сети сейчас</div>
           </div>
         </div>
         <div className="stat-card">
-  <div className="stat-icon sales"><i className="fas fa-chart-line"></i></div>
-  <div className="stat-info">
-    <div className="stat-number">{salesToday}</div>
-    <div className="stat-label">Продаж сегодня</div>
-  </div>
-</div>
+          <div className="stat-icon"><i className="fas fa-chart-line"></i></div>
+          <div className="stat-info">
+            <div className="stat-number">{salesToday}</div>
+            <div className="stat-label">Продаж сегодня</div>
+          </div>
+        </div>
         <div className="stat-card">
-          <div className="stat-icon logs"><i className="fas fa-clipboard-list"></i></div>
+          <div className="stat-icon"><i className="fas fa-clipboard-list"></i></div>
           <div className="stat-info">
             <div className="stat-number">{logs.length}</div>
             <div className="stat-label">Записей в логе</div>
@@ -331,7 +318,7 @@ export default function Dashboard({ user, onLogout }) {
           <i className="fas fa-users-cog"></i>
         </div>
         <h3>Управление продавцами</h3>
-        <button className="add-seller-btn" onClick={addSeller}>
+        <button className="btn btn-success" onClick={addSeller}>
           <i className="fas fa-plus"></i>
           Добавить продавца
         </button>
@@ -345,7 +332,7 @@ export default function Dashboard({ user, onLogout }) {
                 <i className="fas fa-user"></i>
               </div>
               <div className={`seller-status ${seller.is_online ? 'online' : 'offline'}`}>
-                <i className={`fas ${seller.is_online ? 'fa-circle' : 'fa-circle'}`}></i>
+                <i className="fas fa-circle"></i>
                 {seller.is_online ? 'В сети' : 'Не в сети'}
               </div>
             </div>
@@ -357,7 +344,7 @@ export default function Dashboard({ user, onLogout }) {
             </div>
             
             <div className="seller-actions">
-              <button className="delete-btn" onClick={() => removeSeller(seller.id, seller.fullname)}>
+              <button className="btn btn-danger" onClick={() => removeSeller(seller.id, seller.fullname)}>
                 <i className="fas fa-trash"></i>
                 Удалить
               </button>
@@ -369,7 +356,6 @@ export default function Dashboard({ user, onLogout }) {
   );
 
   const LogsTab = () => {
-    // Фильтруем логи по типу события
     const filteredLogs = logs.filter(log => {
         const action = log.action.toLowerCase();
         if (logFilter === 'all') return true;
@@ -408,13 +394,6 @@ export default function Dashboard({ user, onLogout }) {
               <i className="fas fa-sign-out-alt"></i>
               Выход
             </button>
-            {/* <button 
-              onClick={() => setLogFilter('sale')} 
-              className={`filter-btn ${logFilter === 'sale' ? 'active' : ''}`}
-            >
-              <i className="fas fa-shopping-cart"></i>
-              Продажи
-            </button> */}
           </div>
         </div>
         
@@ -466,43 +445,30 @@ export default function Dashboard({ user, onLogout }) {
       
       <div className="actions-grid">
         <div className="action-card">
-          <div className="action-icon new-sale">
+          <div className="action-icon">
             <i className="fas fa-plus-circle"></i>
           </div>
           <div className="action-content">
             <h4>Новая продажа</h4>
             <p>Оформить продажу товара</p>
-            <button className="action-btn primary" onClick={() => navigate('/new-sale')}>
+            <button className="btn btn-dark" onClick={() => navigate('/new-sale')}>
               Начать продажу
             </button>
           </div>
         </div>
         
         <div className="action-card">
-          <div className="action-icon history">
+          <div className="action-icon">
             <i className="fas fa-history"></i>
           </div>
           <div className="action-content">
             <h4>История продаж</h4>
             <p>Просмотр всех продаж</p>
-            <button className="action-btn primary" onClick={() => navigate('/sales-history')}>
+            <button className="btn btn-dark" onClick={() => navigate('/sales-history')}>
               Посмотреть историю
             </button>
           </div>
         </div>
-        
-        {/* <div className="action-card">
-          <div className="action-icon stats">
-            <i className="fas fa-chart-bar"></i>
-          </div>
-          <div className="action-content">
-            <h4>Статистика</h4>
-            <p>Аналитика продаж</p>
-            <button className="action-btn secondary">
-              Открыть отчёты
-            </button>
-          </div>
-        </div> */}
       </div>
     </div>
   );
@@ -511,303 +477,282 @@ export default function Dashboard({ user, onLogout }) {
     <>
       <style>{`
         :root {
-          --primary-color: #0b3d91;
-          --secondary-color: #112e51;
-          --accent-color: #d8b365;
-          --success-color: #0f9d58;
-          --warning-color: #f4b400;
-          --danger-color: #db4437;
-          --dark-color: #202124;
-          --light-bg: #f0f2f5;
-          --white: #ffffff;
-          --text-color: #333;
-          --light-text: #757575;
-          --border-color: #dadce0;
-          --shadow: 0 4px 15px rgba(0,0,0,0.15);
-          --shadow-lg: 0 10px 25px rgba(0,0,0,0.15);
-        }
-
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-
-        body {
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          background-color: var(--light-bg);
-          color: var(--text-color);
-          line-height: 1.6;
+          --bg: #fafafa;
+          --card-bg: #ffffff;
+          --text: #333333;
+          --muted: #888888;
+          --border: #e0e0e0;
+          --dark: #333333;
+          --success: #2ecc71;
+          --danger: #db4437;
         }
 
         .dashboard {
           min-height: 100vh;
-          background: var(--light-bg);
+          background: var(--bg);
         }
 
-        .dashboard-header {
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
-          padding: 20px 40px;
-          box-shadow: var(--shadow);
+        .topbar {
+          background: var(--card-bg);
+          border-bottom: 1px solid var(--border);
+          padding: 16px 24px;
+        }
+
+        .topbar-inner {
+          max-width: 1200px;
+          margin: 0 auto;
           display: flex;
-          justify-content: space-between;
           align-items: center;
+          justify-content: space-between;
         }
 
         .user-section {
           display: flex;
           align-items: center;
-          gap: 15px;
+          gap: 12px;
         }
 
         .user-avatar {
-          width: 60px;
-          height: 60px;
+          width: 40px;
+          height: 40px;
           border-radius: 50%;
-          background: rgba(255,255,255,0.2);
+          background: #333;
+          color: #fff;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 24px;
-          color: white;
-          border: 2px solid var(--accent-color);
         }
 
         .user-info h2 {
-          font-size: 24px;
+          margin: 0 0 2px 0;
+          font-size: 18px;
+          color: var(--text);
           font-weight: 600;
-          margin-bottom: 5px;
         }
 
         .user-info p {
-          opacity: 0.9;
+          margin: 0;
+          font-size: 13px;
+          color: var(--muted);
+        }
+
+        .time {
+          color: var(--muted);
           font-size: 14px;
+          margin-right: 12px;
         }
 
-        .logout-btn {
-          background: var(--danger-color);
-          color: white;
-          border: none;
-          padding: 12px 24px;
-          border-radius: 8px;
+        .btn {
+          padding: 10px 16px;
+          border-radius: 6px;
+          border: 1px solid var(--border);
+          background: var(--card-bg);
+          color: var(--text);
           cursor: pointer;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.3s;
-          font-size: 16px;
+          font-size: 14px;
+          transition: all .2s;
         }
 
-        .logout-btn:hover {
-          background: #c0392b;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        .btn:hover {
+          background: #f5f5f5;
+          border-color: #bbb;
+        }
+
+        .btn-dark {
+          background: var(--dark);
+          color: #fff;
+          border: none;
+        }
+
+        .btn-dark:hover {
+          background: #555;
+        }
+
+        .btn-success {
+          background: var(--success);
+          color: #fff;
+          border: none;
+        }
+
+        .btn-success:hover {
+          background: #27ae60;
+        }
+
+        .btn-danger {
+          background: var(--card-bg);
+          color: var(--danger);
+          border: 1px solid #f0c3bf;
+        }
+
+        .btn-danger:hover {
+          background: #fdecea;
+          border-color: #f1a199;
         }
 
         .dashboard-content {
-          padding: 40px;
-          max-width: 1400px;
+          padding: 24px;
+        }
+
+        .container {
+          max-width: 1200px;
           margin: 0 auto;
         }
 
         .nav-tabs {
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 8px;
           display: flex;
-          background: white;
-          border-radius: 12px;
-          box-shadow: var(--shadow);
-          margin-bottom: 30px;
           overflow: hidden;
+          margin-bottom: 16px;
         }
 
         .nav-tab {
           flex: 1;
-          padding: 16px 24px;
+          padding: 12px 16px;
           background: transparent;
           border: none;
           cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 8px;
-          font-weight: 600;
-          font-size: 16px;
-          color: var(--light-text);
-          transition: all 0.3s;
+          font-size: 14px;
+          color: var(--muted);
+          transition: background .2s, color .2s;
+        }
+
+        .nav-tab:hover {
+          background: #f5f5f5;
+          color: var(--text);
         }
 
         .nav-tab.active {
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
-        }
-
-        .nav-tab:not(.active):hover {
-          background: #f8f9fa;
-          color: var(--primary-color);
+          background: var(--dark);
+          color: #fff;
         }
 
         .tab-content {
-          background: white;
-          border-radius: 12px;
-          box-shadow: var(--shadow);
-          padding: 40px;
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 24px;
         }
 
         .stats-container {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-          gap: 24px;
-          margin-bottom: 40px;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 16px;
+          margin-bottom: 24px;
         }
 
         .stat-card {
-          background: white;
-          border-radius: 12px;
-          padding: 24px;
-          box-shadow: var(--shadow);
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 16px;
           display: flex;
           align-items: center;
-          gap: 20px;
-          transition: transform 0.3s;
-        }
-
-        .stat-card:hover {
-          transform: translateY(-5px);
-          box-shadow: var(--shadow-lg);
+          gap: 12px;
         }
 
         .stat-icon {
-          width: 60px;
-          height: 60px;
-          border-radius: 12px;
+          width: 40px;
+          height: 40px;
+          border-radius: 8px;
+          background: #f5f5f5;
+          color: var(--dark);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 24px;
-          color: white;
-        }
-
-        .stat-icon.users { background: linear-gradient(135deg, var(--success-color), #27ae60); }
-        .stat-icon.online { background: linear-gradient(135deg, #3498db, #2980b9); }
-        .stat-icon.sales { background: linear-gradient(135deg, var(--warning-color), #e67e22); }
-        .stat-icon.logs { background: linear-gradient(135deg, #9b59b6, #8e44ad); }
-
-        .stat-info {
-          flex: 1;
         }
 
         .stat-number {
-          font-size: 32px;
+          font-size: 22px;
           font-weight: 700;
-          color: var(--dark-color);
-          margin-bottom: 4px;
+          color: var(--text);
+          margin-bottom: 2px;
         }
 
         .stat-label {
-          color: var(--light-text);
-          font-size: 14px;
+          font-size: 13px;
+          color: var(--muted);
         }
 
         .main-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
-          gap: 30px;
+          gap: 16px;
         }
 
         .section-header {
           display: flex;
           align-items: center;
-          gap: 15px;
-          margin-bottom: 25px;
-          padding-bottom: 15px;
-          border-bottom: 2px solid var(--border-color);
+          gap: 12px;
+          margin-bottom: 16px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--border);
         }
 
-        .section-header .section-icon {
-          width: 50px;
-          height: 50px;
-          border-radius: 12px;
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
+        .section-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 8px;
+          background: #f5f5f5;
+          color: var(--dark);
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 20px;
         }
 
         .section-header h3 {
-          font-size: 22px;
+          margin: 0;
+          font-size: 18px;
           font-weight: 600;
-          color: var(--dark-color);
+          color: var(--text);
           flex: 1;
         }
 
-        .activity-list {
+        .activity-list, .online-list, .logs-list {
           max-height: 400px;
           overflow-y: auto;
         }
 
-        .activity-item {
+        .activity-item, .online-item, .log-item {
           display: flex;
           align-items: center;
-          gap: 15px;
-          padding: 16px 0;
-          border-bottom: 1px solid var(--border-color);
+          gap: 12px;
+          padding: 12px 0;
+          border-bottom: 1px solid var(--border);
         }
 
-        .activity-item:last-child {
+        .activity-item:last-child, .online-item:last-child, .log-item:last-child {
           border-bottom: none;
         }
 
-        .activity-avatar {
-          width: 45px;
-          height: 45px;
+        .activity-avatar, .log-icon {
+          width: 36px;
+          height: 36px;
           border-radius: 50%;
-          background: var(--light-bg);
+          background: #f5f5f5;
+          color: var(--dark);
           display: flex;
           align-items: center;
           justify-content: center;
-          color: var(--primary-color);
         }
 
-        .activity-details {
-          flex: 1;
+        .activity-text, .log-text {
+          color: var(--text);
+          margin-bottom: 2px;
         }
 
-        .activity-text {
-          margin-bottom: 4px;
-          color: var(--text-color);
-        }
-
-        .activity-time {
+        .activity-time, .log-time {
+          color: var(--muted);
           font-size: 12px;
-          color: var(--light-text);
-        }
-
-        .online-list {
-          max-height: 400px;
-          overflow-y: auto;
-        }
-
-        .online-item {
-          display: flex;
-          align-items: center;
-          gap: 15px;
-          padding: 16px 0;
-          border-bottom: 1px solid var(--border-color);
-        }
-
-        .online-item:last-child {
-          border-bottom: none;
         }
 
         .online-avatar {
-          width: 45px;
-          height: 45px;
+          width: 36px;
+          height: 36px;
           border-radius: 50%;
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
+          background: #333;
+          color: #fff;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -819,198 +764,97 @@ export default function Dashboard({ user, onLogout }) {
 
         .online-name {
           font-weight: 600;
-          margin-bottom: 4px;
+          color: var(--text);
+          margin-bottom: 2px;
         }
 
         .online-username {
-          font-size: 14px;
-          color: var(--light-text);
-        }
-
-        .status-indicator {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
+          font-size: 13px;
+          color: var(--muted);
         }
 
         .status-indicator.online {
-          background: var(--success-color);
-          box-shadow: 0 0 10px rgba(15, 157, 88, 0.5);
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--success);
         }
 
         .empty-state {
           text-align: center;
-          padding: 40px 20px;
-          color: var(--light-text);
-        }
-
-        .empty-state i {
-          font-size: 48px;
-          margin-bottom: 15px;
-          opacity: 0.5;
-        }
-
-        .add-seller-btn {
-          background: var(--success-color);
-          color: white;
-          border: none;
-          padding: 12px 20px;
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          transition: all 0.3s;
-        }
-
-        .add-seller-btn:hover {
-          background: #0d8043;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+          padding: 24px;
+          color: var(--muted);
         }
 
         .sellers-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 24px;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          gap: 16px;
         }
 
         .seller-card {
-          background: var(--light-bg);
-          border-radius: 12px;
-          padding: 24px;
-          border: 1px solid var(--border-color);
-          transition: all 0.3s;
-        }
-
-        .seller-card:hover {
-          transform: translateY(-5px);
-          box-shadow: var(--shadow);
-          border-color: var(--primary-color);
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 16px;
         }
 
         .seller-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 20px;
+          margin-bottom: 12px;
         }
 
         .seller-avatar {
-          width: 50px;
-          height: 50px;
+          width: 40px;
+          height: 40px;
           border-radius: 50%;
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
+          background: #333;
+          color: #fff;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 20px;
         }
 
         .seller-status {
           display: flex;
           align-items: center;
           gap: 6px;
-          padding: 6px 12px;
-          border-radius: 20px;
+          padding: 6px 10px;
+          border-radius: 14px;
           font-size: 12px;
-          font-weight: 600;
+          border: 1px solid var(--border);
+          color: var(--muted);
+          background: #fff;
         }
 
         .seller-status.online {
-          background: rgba(15, 157, 88, 0.1);
-          color: var(--success-color);
+          color: var(--success);
+          border-color: #cfe9dc;
+          background: #f3fbf6;
         }
 
         .seller-status.offline {
-          background: rgba(117, 117, 117, 0.1);
-          color: var(--light-text);
+          color: var(--muted);
         }
 
         .seller-name {
-          font-size: 20px;
+          font-size: 16px;
           font-weight: 600;
-          margin-bottom: 8px;
-          color: var(--dark-color);
-        }
-
-        .seller-username {
-          color: var(--light-text);
+          color: var(--text);
           margin-bottom: 4px;
         }
 
-        .seller-email {
-          color: var(--light-text);
-          font-size: 14px;
+        .seller-username, .seller-email {
+          font-size: 13px;
+          color: var(--muted);
         }
 
         .seller-actions {
-          margin-top: 20px;
-          padding-top: 20px;
-          border-top: 1px solid var(--border-color);
-        }
-
-        .delete-btn {
-          background: var(--danger-color);
-          color: white;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-weight: 600;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          transition: all 0.3s;
-          font-size: 14px;
-        }
-
-        .delete-btn:hover {
-          background: #c0392b;
-          transform: scale(1.05);
-        }
-
-        .logs-list {
-          max-height: 600px;
-          overflow-y: auto;
-        }
-
-        .log-item {
-          display: flex;
-          gap: 15px;
-          padding: 16px 0;
-          border-bottom: 1px solid var(--border-color);
-        }
-
-        .log-item:last-child {
-          border-bottom: none;
-        }
-
-        .log-icon {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: var(--light-bg);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: var(--primary-color);
-        }
-
-        .log-content {
-          flex: 1;
-        }
-
-        .log-text {
-          margin-bottom: 4px;
-        }
-
-        .log-time {
-          font-size: 12px;
-          color: var(--light-text);
-          font-family: monospace;
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid var(--border);
         }
 
         .filter-buttons {
@@ -1020,287 +864,139 @@ export default function Dashboard({ user, onLogout }) {
         }
 
         .filter-btn {
-          display: flex;
+          padding: 8px 12px;
+          border-radius: 6px;
+          border: 1px solid var(--border);
+          background: #fff;
+          color: var(--text);
+          cursor: pointer;
+          font-size: 13px;
+          transition: all .2s;
+          display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 10px 16px;
-          border: 2px solid var(--border-color);
-          background: white;
-          color: var(--text-color);
-          border-radius: 8px;
-          cursor: pointer;
-          font-weight: 500;
-          font-size: 14px;
-          transition: all 0.3s ease;
         }
 
         .filter-btn:hover {
-          background: var(--light-bg);
-          border-color: var(--primary-color);
-          color: var(--primary-color);
-          transform: translateY(-1px);
+          background: #f5f5f5;
         }
 
         .filter-btn.active {
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
-          border-color: var(--primary-color);
-          box-shadow: 0 2px 8px rgba(11, 61, 145, 0.3);
-        }
-
-        .filter-btn.active:hover {
-          background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
-          color: white;
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(11, 61, 145, 0.4);
-        }
-
-        .filter-btn i {
-          font-size: 12px;
-        }
-
-        .welcome-section {
-          margin-bottom: 30px;
+          background: var(--dark);
+          color: #fff;
+          border-color: var(--dark);
         }
 
         .welcome-text {
-          color: var(--light-text);
-          font-size: 16px;
-          margin-top: 10px;
+          color: var(--muted);
+          font-size: 14px;
+          margin-top: 6px;
         }
 
         .actions-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-          gap: 24px;
+          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+          gap: 16px;
         }
 
         .action-card {
-          background: white;
-          border-radius: 12px;
-          padding: 32px;
-          box-shadow: var(--shadow);
+          background: var(--card-bg);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 20px;
           text-align: center;
-          transition: all 0.3s;
-          border: 1px solid var(--border-color);
-        }
-
-        .action-card:hover {
-          transform: translateY(-8px);
-          box-shadow: var(--shadow-lg);
-          border-color: var(--primary-color);
         }
 
         .action-icon {
-          width: 80px;
-          height: 80px;
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
+          background: #f5f5f5;
+          color: var(--dark);
           display: flex;
           align-items: center;
           justify-content: center;
-          margin: 0 auto 20px;
-          font-size: 32px;
-          color: white;
+          margin: 0 auto 12px;
+          font-size: 24px;
         }
 
-        .action-icon.new-sale { background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); }
-        .action-icon.history { background: linear-gradient(135deg, #9b59b6, #8e44ad); }
-        .action-icon.stats { background: linear-gradient(135deg, var(--warning-color), #e67e22); }
-
-        .action-content h4 {
-          font-size: 20px;
-          font-weight: 600;
-          margin-bottom: 12px;
-          color: var(--dark-color);
-        }
-
-        .action-content p {
-          color: var(--light-text);
-          margin-bottom: 20px;
-          line-height: 1.5;
-        }
-
-        .action-btn {
-          padding: 12px 24px;
-          border-radius: 8px;
-          border: none;
-          cursor: pointer;
-          font-weight: 600;
-          transition: all 0.3s;
-          width: 100%;
-          font-size: 14px;
-        }
-
-        .action-btn.primary {
-          background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
-          color: white;
-        }
-
-        .action-btn.primary:hover {
-          background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-
-        .action-btn.secondary {
-          background: var(--light-text);
-          color: white;
-        }
-
-        .action-btn.secondary:hover {
-          background: var(--text-color);
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        footer.simple {
+          text-align: center;
+          padding: 12px;
+          font-size: 13px;
+          color: #666;
+          border-top: 1px solid #ddd;
+          background: #f9f9f9;
+          margin-top: 16px;
         }
 
         @media (max-width: 768px) {
-          .dashboard-header {
-            padding: 15px 20px;
-            flex-direction: column;
-            gap: 15px;
-            text-align: center;
-          }
-
-          .dashboard-content {
-            padding: 20px;
-          }
-
-          .stats-container {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
-          }
-
           .main-grid {
             grid-template-columns: 1fr;
           }
-
-          .sellers-grid {
-            grid-template-columns: 1fr;
-          }
-
-          .actions-grid {
-            grid-template-columns: 1fr;
-          }
-
           .nav-tabs {
             flex-direction: column;
-          }
-
-          .tab-content {
-            padding: 20px;
-          }
-
-          .filter-buttons {
-            flex-wrap: wrap;
-            margin-left: 0;
-            margin-top: 15px;
-            gap: 8px;
-          }
-
-          .filter-btn {
-            padding: 8px 12px;
-            font-size: 12px;
-          }
-
-          .section-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 10px;
-          }
-        }
-
-        @media (max-width: 480px) {
-          .stats-container {
-            grid-template-columns: 1fr;
-          }
-
-          .stat-card {
-            padding: 16px;
-          }
-
-          .section-header .section-icon {
-            width: 40px;
-            height: 40px;
-            font-size: 16px;
-          }
-
-          .filter-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            width: 100%;
           }
         }
       `}</style>
 
-<div className="dashboard">
-        {/* dashboard-header и навигация */}
-        <div className="dashboard-header">
-          <div className="user-section">
-            <div className="user-avatar"><i className="fas fa-user"></i></div>
-            <div className="user-info">
-              <h2>{user.fullname}</h2>
-              <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
+      <div className="dashboard">
+        <div className="topbar">
+          <div className="topbar-inner">
+            <div className="user-section">
+              <div className="user-avatar"><i className="fas fa-user"></i></div>
+              <div className="user-info">
+                <h2>{user.fullname}</h2>
+                <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span className="time">{formatTime(currentTime)}</span>
+              <button className="btn btn-dark" onClick={handleLogout}>
+                <i className="fas fa-sign-out-alt"></i>
+                Выйти
+              </button>
             </div>
           </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-          <span className="time">{formatTime(currentTime)}</span>
-          <button className="logout-btn" onClick={handleLogout}>
-            <i className="fas fa-sign-out-alt"></i>
-            Выйти
-          </button>
         </div>
-      </div>
-      
-          {/* <button className="logout-btn" onClick={handleLogout}>
-            <i className="fas fa-sign-out-alt"></i>
-            Выйти
-          </button>
-        </div> */}
 
         <div className="dashboard-content">
-          {user.role === 'owner' ? (
-            <>
-              <div className="nav-tabs">
-                <button className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-                  <i className="fas fa-chart-pie"></i> Обзор
-                </button>
-                <button className={`nav-tab ${activeTab === 'sellers' ? 'active' : ''}`} onClick={() => setActiveTab('sellers')}>
-                  <i className="fas fa-users"></i> Продавцы
-                </button>
-                <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
-                  <i className="fas fa-file-alt"></i> Журнал
-                </button>
-                <button className={`nav-tab ${activeTab === 'srk' ? 'active' : ''}`} onClick={() => navigate('/adminpanel')}>
-                  <i className="fas fa-crown"></i> Админ-панель
-                </button>
-              </div>
+          <div className="container">
+            {user.role === 'owner' ? (
+              <>
+                <div className="nav-tabs">
+                  <button className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+                    <i className="fas fa-chart-pie"></i> Обзор
+                  </button>
+                  <button className={`nav-tab ${activeTab === 'sellers' ? 'active' : ''}`} onClick={() => setActiveTab('sellers')}>
+                    <i className="fas fa-users"></i> Продавцы
+                  </button>
+                  <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
+                    <i className="fas fa-file-alt"></i> Журнал
+                  </button>
+                  <button className={`nav-tab`} onClick={() => navigate('/adminpanel')}>
+                    <i className="fas fa-crown"></i> Админ-панель
+                  </button>
+                </div>
+
+                <div className="tab-content">
+                  {activeTab === 'overview' && <OverviewTab />}
+                  {activeTab === 'sellers' && <SellersTab />}
+                  {activeTab === 'logs' && <LogsTab />}
+                </div>
+              </>
+            ) : (
               <div className="tab-content">
-                {activeTab === 'overview' && <OverviewTab />}
-                {activeTab === 'sellers' && <SellersTab />}
-                {activeTab === 'logs' && <LogsTab />}
+                <SellerDashboard />
               </div>
-            </>
-          ) : (
-            <div className="tab-content">
-              <SellerDashboard />
-            </div>
-          )}
+            )}
+          </div>
+
+          <footer className="simple">
+            © qaraa.kz | Система безопасного доступа, 2025. <br />
+            Последнее обновление: 02.10.2025 | srk.
+          </footer>
         </div>
-        <footer
-  style={{
-    textAlign: "center",
-    padding: "12px",
-    fontSize: "13px",
-    color: "#666",
-    borderTop: "1px solid #ddd",
-    background: "#f9f9f9"
-  }}
->
-  © qaraa.kz | Система безопасного доступа, 2025. <br />
-  Последнее обновление: 30.09.2025 | srk.
-</footer>
       </div>
     </>
   );
