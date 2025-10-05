@@ -643,7 +643,7 @@ export default function App({ onLogin }) {
             </div>
 
 <div className="footer">
-  <p>Админ панель qaraa.kz &copy; 2025.</p>
+  <p>Админ панель qaraa.crm | powered by Jarvis &copy; 2025.</p>
   <p>Все права защищены. <span style={{ fontWeight: '600' }}>by srk.</span></p>
 </div>
 

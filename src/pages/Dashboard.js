@@ -8,12 +8,12 @@ export default function Dashboard({ user, onLogout }) {
   const [logs, setLogs] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [logFilter, setLogFilter] = useState('all');
-  const [sales, setSales] = useState([]);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [salesToday, setSalesToday] = useState(0);
+  const [profitToday, setProfitToday] = useState(0);
 
   const navigate = useNavigate();
-  const loggedOnce = useRef(false);  
+  const loggedOnce = useRef(false);
 
   async function fetchSalesToday() {
     const today = new Date();
@@ -35,97 +35,122 @@ export default function Dashboard({ user, onLogout }) {
       console.error(error);
     } else {
       setSalesToday(data.length);
+      const profit = data.reduce((sum, sale) => sum + parseFloat(sale.price) * sale.quantity, 0);
+      setProfitToday(profit);
     }
   }
 
   useEffect(() => {
     fetchSalesToday();
   
+    // 🔄 Реакция на новые продажи
     const salesChannel = supabase
-      .channel('public:sales')
-      .on(
-        'postgres_changes',
+      .channel('realtime:sales')
+      .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'sales' },
         (payload) => {
-          // Recalculate using server time boundaries to avoid timezone drift
+          console.log('📦 Новая продажа:', payload.new);
           fetchSalesToday();
         }
       )
       .subscribe();
   
+    // 🔄 Реакция на оплату (если у тебя есть таблица payments)
+    const paymentsChannel = supabase
+      .channel('realtime:payments')
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'payments' },
+        (payload) => {
+          console.log('💳 Новая оплата:', payload.new);
+          fetchSalesToday();
+        }
+      )
+      .subscribe();
+  
+    // ⏱ fallback на случай, если realtime отключится
+    const interval = setInterval(() => {
+      fetchSalesToday();
+    }, 10000);
+  
     return () => {
+      clearInterval(interval);
       supabase.removeChannel(salesChannel);
+      supabase.removeChannel(paymentsChannel);
     };
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const timer = setInterval(() => {
       setCurrentTime(new Date());
-    }, 1000);
-
-    return () => clearInterval(interval);
+    }, 1000); // каждую секунду
+  
+    return () => clearInterval(timer);
   }, []);
 
   const formatTime = (date) => {
     return date.toLocaleTimeString("ru-RU", { hour12: false });
   };
 
+  const fetchSellers = async () => {
+    const { data, error } = await supabase.from('login').select('*').eq('role', 'seller');
+    if (error) console.error('Ошибка при загрузке продавцов:', error);
+    else {
+      setSellers(data);
+      setOnlineSellers(data.filter(s => s.is_online));
+    }
+  };
+
+  const fetchLogs = async () => {
+    const { data, error } = await supabase
+      .from('logs')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) console.error('Ошибка загрузки логов:', error);
+    else setLogs(data);
+  };
+
   useEffect(() => {
-    let interval;
-    
-    const fetchSales = async () => {
-      const { data, error } = await supabase
-        .from('sales')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) console.error('Ошибка загрузки продаж:', error);
-      else setSales(data);
-    };
-
-    const fetchSellers = async () => {
-      const { data, error } = await supabase.from('login').select('*').eq('role', 'seller');
-      if (error) console.error('Ошибка при загрузке продавцов:', error);
-      else {
-        setSellers(data);
-        setOnlineSellers(data.filter(s => s.is_online));
-      }
-    };
-
-    const fetchLogs = async () => {
-      const { data, error } = await supabase
-        .from('logs')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) console.error('Ошибка загрузки логов:', error);
-      else setLogs(data);
-    };
-
-    const handleBeforeUnload = async (event) => {
-      if (user.role === 'seller') {
-        await markOnline(user.id, false);
-        await logAction('Вышел из системы', false);
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    if (user.role === 'owner') {
+    if (user.role !== 'owner') return;
+  
+    fetchSellers();
+    fetchLogs();
+    fetchSalesToday();
+  
+    const sellerChannel = supabase
+      .channel('realtime:login')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'login' },
+        (payload) => {
+          console.log('👥 Изменение в login:', payload);
+          fetchSellers();
+        }
+      )
+      .subscribe();
+  
+    const logChannel = supabase
+      .channel('realtime:logs')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'logs' },
+        (payload) => {
+          console.log('🪵 Новый лог:', payload);
+          fetchLogs();
+        }
+      )
+      .subscribe();
+  
+    // fallback на случай отключения realtime
+    const interval = setInterval(() => {
       fetchSellers();
       fetchLogs();
-      fetchSales();
       fetchSalesToday();
-      interval = setInterval(() => {
-        fetchSellers();
-        fetchLogs();
-        fetchSales();
-        fetchSalesToday();
-      }, 5000);
-    }
-
+    }, 10000);
+  
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
+      supabase.removeChannel(sellerChannel);
+      supabase.removeChannel(logChannel);
     };
   }, [user]);
 
@@ -142,7 +167,10 @@ export default function Dashboard({ user, onLogout }) {
 
     if (!email || !password || !username || !fullname) return alert("Все поля обязательны!");
 
-    const { error } = await supabase.from('login').insert([{ email, password, username, fullname, role: 'seller', is_online: false }]);
+    const { error } = await supabase.from('login').insert([{ 
+      email, password, username, fullname, role: 'seller', is_online: false 
+    }]);
+    
     if (error) alert('Ошибка при добавлении продавца: ' + error.message);
     else {
       alert('Продавец добавлен');
@@ -165,18 +193,11 @@ export default function Dashboard({ user, onLogout }) {
   const addLog = async (fullname, action, doFetch = true) => {
     const now = new Date();
     const almatyTime = new Date(now.getTime() + 5 * 60 * 60 * 1000);
-    const { error } = await supabase.from('logs').insert([{ fullname, action, created_at: almatyTime }]);
+    const { error } = await supabase.from('logs').insert([{ 
+      fullname, action, created_at: almatyTime 
+    }]);
     if (error) console.error('Ошибка добавления лога:', error);
     else if (doFetch) fetchLogs();
-  };
-
-  const fetchLogs = async () => {
-    const { data, error } = await supabase
-      .from('logs')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) console.error('Ошибка загрузки логов:', error);
-    else setLogs(data);
   };
 
   useEffect(() => {
@@ -210,65 +231,211 @@ export default function Dashboard({ user, onLogout }) {
     if (!user) return;
     const now = new Date();
     const almatyTime = new Date(now.getTime() + 5 * 60 * 60 * 1000);
-    const { error } = await supabase.from('logs').insert([{ fullname: user.fullname, action, created_at: almatyTime }]);
+    const { error } = await supabase.from('logs').insert([{ 
+      fullname: user.fullname, action, created_at: almatyTime 
+    }]);
     if (error) console.error('Ошибка добавления лога:', error);
     if (doFetch) fetchLogs();
   };
 
   const OverviewTab = () => (
-    <div className="overview-content">
-      <div className="stats-container">
-        <div className="stat-card">
-          <div className="stat-icon"><i className="fas fa-users"></i></div>
-          <div className="stat-info">
-            <div className="stat-number">{sellers.length}</div>
-            <div className="stat-label">Всего продавцов</div>
+    <div>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', 
+        gap: '20px', 
+        marginBottom: '28px' 
+      }}>
+        <div style={{ 
+          padding: '28px', 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          border: '2px solid #e5e7eb'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ 
+              width: '48px', 
+              height: '48px', 
+              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', 
+              borderRadius: '12px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+            <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+              Всего продавцов
+            </p>
           </div>
+          <p style={{ fontSize: '40px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+            {sellers.length}
+          </p>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon"><i className="fas fa-user-check"></i></div>
-          <div className="stat-info">
-            <div className="stat-number">{onlineSellers.length}</div>
-            <div className="stat-label">В сети сейчас</div>
+
+        <div style={{ 
+          padding: '28px', 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          border: '2px solid #e5e7eb'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ 
+              width: '48px', 
+              height: '48px', 
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
+              borderRadius: '12px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+              В сети сейчас
+            </p>
           </div>
+          <p style={{ fontSize: '40px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+            {onlineSellers.length}
+          </p>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon"><i className="fas fa-chart-line"></i></div>
-          <div className="stat-info">
-            <div className="stat-number">{salesToday}</div>
-            <div className="stat-label">Продаж сегодня</div>
+
+        <div style={{ 
+          padding: '28px', 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          border: '2px solid #e5e7eb'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ 
+              width: '48px', 
+              height: '48px', 
+              background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', 
+              borderRadius: '12px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+              </svg>
+            </div>
+            <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+              Продаж сегодня
+            </p>
           </div>
+          <p style={{ fontSize: '40px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+            {salesToday}
+          </p>
         </div>
-        <div className="stat-card">
-          <div className="stat-icon"><i className="fas fa-clipboard-list"></i></div>
-          <div className="stat-info">
-            <div className="stat-number">{logs.length}</div>
-            <div className="stat-label">Записей в логе</div>
+
+        <div style={{ 
+          padding: '28px', 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          border: '2px solid #e5e7eb'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+            <div style={{ 
+              width: '48px', 
+              height: '48px', 
+              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', 
+              borderRadius: '12px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 6h8M8 10h8M12 10v8" />
+              </svg>
+            </div>
+            <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+              Прибыль сегодня
+            </p>
           </div>
+          <p style={{ fontSize: '32px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+            {profitToday.toLocaleString()} ₸
+          </p>
         </div>
       </div>
 
-      <div className="main-grid">
-        <div className="activity-section">
-          <div className="section-header">
-            <div className="section-icon"><i className="fas fa-history"></i></div>
-            <h3>Последняя активность</h3>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div style={{ 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)', 
+          overflow: 'hidden' 
+        }}>
+          <div style={{ 
+            padding: '24px 32px', 
+            background: '#fafafa', 
+            borderBottom: '2px solid #e5e7eb',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}>
+            <div style={{ 
+              width: '40px', 
+              height: '40px', 
+              background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)', 
+              borderRadius: '10px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              color: 'white'
+            }}>
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1a1a1a' }}>
+              Последняя активность
+            </h3>
           </div>
-          <div className="activity-list">
+          <div style={{ padding: '24px 32px', maxHeight: '400px', overflowY: 'auto' }}>
             {logs.slice(0, 6).map((log, idx) => (
-              <div key={idx} className="activity-item">
-                <div className="activity-avatar">
-                  <i className={`fas ${
-                    log.action.includes('Вошёл') ? 'fa-sign-in-alt' : 
-                    log.action.includes('Вышел') ? 'fa-sign-out-alt' : 
-                    'fa-user-plus'
-                  }`}></i>
+              <div key={idx} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '16px',
+                padding: '16px 0',
+                borderBottom: idx < 5 ? '1px solid #f3f4f6' : 'none'
+              }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  background: log.action.includes('Вошёл') ? '#f0fdf4' : 
+                              log.action.includes('Вышел') ? '#fef2f2' : '#fafafa',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: log.action.includes('Вошёл') ? '#16a34a' : 
+                         log.action.includes('Вышел') ? '#dc2626' : '#6b7280'
+                }}>
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {log.action.includes('Вошёл') ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                    ) : log.action.includes('Вышел') ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                    )}
+                  </svg>
                 </div>
-                <div className="activity-details">
-                  <div className="activity-text">
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '14px', color: '#1a1a1a', fontWeight: '500', marginBottom: '4px' }}>
                     <strong>{log.fullname}</strong> {log.action.toLowerCase()}
                   </div>
-                  <div className="activity-time">
+                  <div style={{ fontSize: '13px', color: '#6b7280' }}>
                     {new Date(log.created_at).toLocaleString('ru-RU', { 
                       timeZone: 'Asia/Almaty',
                       day: '2-digit',
@@ -283,27 +450,96 @@ export default function Dashboard({ user, onLogout }) {
           </div>
         </div>
 
-        <div className="online-section">
-          <div className="section-header">
-            <div className="section-icon"><i className="fas fa-users-cog"></i></div>
-            <h3>Продавцы в сети</h3>
+        <div style={{ 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)', 
+          overflow: 'hidden' 
+        }}>
+          <div style={{ 
+            padding: '24px 32px', 
+            background: '#fafafa', 
+            borderBottom: '2px solid #e5e7eb',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px'
+          }}>
+            <div style={{ 
+              width: '40px', 
+              height: '40px', 
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
+              borderRadius: '10px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              color: 'white'
+            }}>
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            </div>
+            <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1a1a1a' }}>
+              Продавцы в сети
+            </h3>
           </div>
-          <div className="online-list">
-            {onlineSellers.map(seller => (
-              <div key={seller.id} className="online-item">
-                <div className="online-avatar"><i className="fas fa-user"></i></div>
-                <div className="online-info">
-                  <div className="online-name">{seller.fullname}</div>
-                  <div className="online-username">@{seller.username}</div>
+          <div style={{ padding: '24px 32px', maxHeight: '400px', overflowY: 'auto' }}>
+            {onlineSellers.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 24px' }}>
+                <div style={{ 
+                  width: '64px', 
+                  height: '64px', 
+                  background: '#fafafa', 
+                  borderRadius: '50%', 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  marginBottom: '16px' 
+                }}>
+                  <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="#9ca3af">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
                 </div>
-                <div className="status-indicator online"></div>
+                <p style={{ color: '#6b7280', fontSize: '14px' }}>Нет активных продавцов</p>
               </div>
-            ))}
-            {onlineSellers.length === 0 && (
-              <div className="empty-state">
-                <i className="fas fa-users-slash"></i>
-                <p>Нет активных продавцов</p>
-              </div>
+            ) : (
+              onlineSellers.map((seller, idx) => (
+                <div key={seller.id} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  padding: '16px 0',
+                  borderBottom: idx < onlineSellers.length - 1 ? '1px solid #f3f4f6' : 'none'
+                }}>
+                  <div style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                    color: 'white',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '16px',
+                    fontWeight: '600'
+                  }}>
+                    {seller.fullname[0]?.toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '15px', color: '#1a1a1a', fontWeight: '600', marginBottom: '4px' }}>
+                      {seller.fullname}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                      @{seller.username}
+                    </div>
+                  </div>
+                  <div style={{
+                    width: '10px',
+                    height: '10px',
+                    borderRadius: '50%',
+                    background: '#10b981'
+                  }}></div>
+                </div>
+              ))
             )}
           </div>
         </div>
@@ -312,43 +548,155 @@ export default function Dashboard({ user, onLogout }) {
   );
 
   const SellersTab = () => (
-    <div className="sellers-content">
-      <div className="section-header">
-        <div className="section-icon">
-          <i className="fas fa-users-cog"></i>
+    <div>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: '24px',
+        flexWrap: 'wrap',
+        gap: '16px'
+      }}>
+        <div>
+          <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#1a1a1a', marginBottom: '4px' }}>
+            Управление продавцами
+          </h2>
+          <p style={{ color: '#6b7280', fontSize: '14px' }}>
+            Добавляйте и управляйте продавцами системы
+          </p>
         </div>
-        <h3>Управление продавцами</h3>
-        <button className="btn btn-success" onClick={addSeller}>
-          <i className="fas fa-plus"></i>
+        <button
+          onClick={addSeller}
+          style={{
+            padding: '14px 28px',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '12px',
+            fontSize: '15px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.3s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+          onMouseOver={(e) => {
+            e.target.style.transform = 'translateY(-2px)';
+            e.target.style.boxShadow = '0 10px 30px rgba(16, 185, 129, 0.3)';
+          }}
+          onMouseOut={(e) => {
+            e.target.style.transform = 'translateY(0)';
+            e.target.style.boxShadow = 'none';
+          }}
+        >
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+          </svg>
           Добавить продавца
         </button>
       </div>
-      
-      <div className="sellers-grid">
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
         {sellers.map(seller => (
-          <div key={seller.id} className="seller-card">
-            <div className="seller-header">
-              <div className="seller-avatar">
-                <i className="fas fa-user"></i>
+          <div key={seller.id} style={{
+            background: 'white',
+            borderRadius: '20px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+            border: '2px solid #e5e7eb',
+            padding: '24px',
+            transition: 'all 0.3s'
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.transform = 'translateY(-4px)';
+            e.currentTarget.style.boxShadow = '0 30px 80px rgba(0, 0, 0, 0.12)';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 20px 60px rgba(0, 0, 0, 0.08)';
+          }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '20px' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                fontWeight: '700'
+              }}>
+                {seller.fullname[0]?.toUpperCase()}
               </div>
-              <div className={`seller-status ${seller.is_online ? 'online' : 'offline'}`}>
-                <i className="fas fa-circle"></i>
+              <div style={{
+                padding: '6px 12px',
+                background: seller.is_online ? '#f0fdf4' : '#fafafa',
+                border: `2px solid ${seller.is_online ? '#bbf7d0' : '#e5e7eb'}`,
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: seller.is_online ? '#16a34a' : '#6b7280'
+              }}>
+                <div style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: seller.is_online ? '#16a34a' : '#9ca3af'
+                }}></div>
                 {seller.is_online ? 'В сети' : 'Не в сети'}
               </div>
             </div>
-            
-            <div className="seller-info">
-              <h4 className="seller-name">{seller.fullname}</h4>
-              <p className="seller-username">@{seller.username}</p>
-              <p className="seller-email">{seller.email}</p>
+
+            <div style={{ marginBottom: '20px' }}>
+              <h4 style={{ fontSize: '18px', fontWeight: '600', color: '#1a1a1a', marginBottom: '8px' }}>
+                {seller.fullname}
+              </h4>
+              <p style={{ fontSize: '14px', color: '#6b7280', marginBottom: '4px' }}>
+                @{seller.username}
+              </p>
+              <p style={{ fontSize: '14px', color: '#6b7280' }}>
+                {seller.email}
+              </p>
             </div>
-            
-            <div className="seller-actions">
-              <button className="btn btn-danger" onClick={() => removeSeller(seller.id, seller.fullname)}>
-                <i className="fas fa-trash"></i>
-                Удалить
-              </button>
-            </div>
+
+            <button
+              onClick={() => removeSeller(seller.id, seller.fullname)}
+              style={{
+                width: '100%',
+                padding: '12px',
+                background: 'white',
+                color: '#dc2626',
+                border: '2px solid #fecaca',
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+              onMouseOver={(e) => {
+                e.target.style.background = '#fef2f2';
+                e.target.style.borderColor = '#dc2626';
+              }}
+              onMouseOut={(e) => {
+                e.target.style.background = 'white';
+                e.target.style.borderColor = '#fecaca';
+              }}
+            >
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Удалить
+            </button>
           </div>
         ))}
       </div>
@@ -357,117 +705,352 @@ export default function Dashboard({ user, onLogout }) {
 
   const LogsTab = () => {
     const filteredLogs = logs.filter(log => {
-        const action = log.action.toLowerCase();
-        if (logFilter === 'all') return true;
-        if (logFilter === 'login') return action.includes('вошёл');
-        if (logFilter === 'logout') return action.includes('вышел');
-        if (logFilter === 'sale') return action.includes('продаж'); 
-        return true;
-      });
-  
+      const action = log.action.toLowerCase();
+      if (logFilter === 'all') return true;
+      if (logFilter === 'login') return action.includes('вошёл');
+      if (logFilter === 'logout') return action.includes('вышел');
+      if (logFilter === 'sale') return action.includes('продаж');
+      return true;
+    });
+
     return (
-      <div className="logs-content">
-        <div className="section-header">
-          <div className="section-icon">
-            <i className="fas fa-file-alt"></i>
+      <div>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          marginBottom: '24px',
+          flexWrap: 'wrap',
+          gap: '16px'
+        }}>
+          <div>
+            <h2 style={{ fontSize: '24px', fontWeight: '700', color: '#1a1a1a', marginBottom: '4px' }}>
+              Журнал активности
+            </h2>
+            <p style={{ color: '#6b7280', fontSize: '14px' }}>
+              Отслеживайте все действия в системе
+            </p>
           </div>
-          <h3>Журнал активности</h3>
-          <div className="filter-buttons">
-            <button 
-              onClick={() => setLogFilter('all')} 
-              className={`filter-btn ${logFilter === 'all' ? 'active' : ''}`}
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setLogFilter('all')}
+              style={{
+                padding: '10px 20px',
+                background: logFilter === 'all' ? 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' : 'white',
+                color: logFilter === 'all' ? 'white' : '#6b7280',
+                border: `2px solid ${logFilter === 'all' ? '#1a1a1a' : '#e5e7eb'}`,
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
             >
-              <i className="fas fa-list"></i>
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
               Все
             </button>
-            <button 
-              onClick={() => setLogFilter('login')} 
-              className={`filter-btn ${logFilter === 'login' ? 'active' : ''}`}
+            <button
+              onClick={() => setLogFilter('login')}
+              style={{
+                padding: '10px 20px',
+                background: logFilter === 'login' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'white',
+                color: logFilter === 'login' ? 'white' : '#6b7280',
+                border: `2px solid ${logFilter === 'login' ? '#10b981' : '#e5e7eb'}`,
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
             >
-              <i className="fas fa-sign-in-alt"></i>
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+              </svg>
               Вход
             </button>
-            <button 
-              onClick={() => setLogFilter('logout')} 
-              className={`filter-btn ${logFilter === 'logout' ? 'active' : ''}`}
+            <button
+              onClick={() => setLogFilter('logout')}
+              style={{
+                padding: '10px 20px',
+                background: logFilter === 'logout' ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 'white',
+                color: logFilter === 'logout' ? 'white' : '#6b7280',
+                border: `2px solid ${logFilter === 'logout' ? '#dc2626' : '#e5e7eb'}`,
+                borderRadius: '10px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
             >
-              <i className="fas fa-sign-out-alt"></i>
+              <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
               Выход
             </button>
           </div>
         </div>
-        
-        <div className="logs-list">
-          {filteredLogs.map((log, idx) => (
-            <div key={idx} className="log-item">
-              <div className="log-icon">
-                <i className={`fas ${
-                  log.action.includes('Вошёл') ? 'fa-sign-in-alt' : 
-                  log.action.includes('Вышел') ? 'fa-sign-out-alt' : 
-                  log.action.includes('продаж') ? 'fa-shopping-cart' : 
-                  'fa-user-plus'
-                }`}></i>
-              </div>
-              <div className="log-content">
-                <div className="log-text">
-                  <strong>{log.fullname}</strong> {log.action.toLowerCase()}
+
+        <div style={{ 
+          background: 'white', 
+          borderRadius: '20px', 
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          overflow: 'hidden'
+        }}>
+          <div style={{ padding: '24px 32px', maxHeight: '600px', overflowY: 'auto' }}>
+            {filteredLogs.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 24px' }}>
+                <div style={{ 
+                  width: '80px', 
+                  height: '80px', 
+                  background: '#fafafa', 
+                  borderRadius: '50%', 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  marginBottom: '20px' 
+                }}>
+                  <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#9ca3af">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
                 </div>
-                <div className="log-time">
-                  {new Date(log.created_at).toLocaleString('ru-RU', { 
-                    timeZone: 'Asia/Almaty',
-                    weekday: 'short',
-                    day: '2-digit',
-                    month: '2-digit',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
-                </div>
+                <h3 style={{ fontSize: '20px', color: '#1a1a1a', fontWeight: '600', marginBottom: '8px' }}>
+                  Нет записей
+                </h3>
+                <p style={{ color: '#6b7280', fontSize: '14px' }}>
+                  Логи с выбранным фильтром отсутствуют
+                </p>
               </div>
-            </div>
-          ))}
+            ) : (
+              filteredLogs.map((log, idx) => (
+                <div key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  padding: '20px',
+                  background: idx % 2 === 0 ? '#fafafa' : 'white',
+                  borderRadius: '12px',
+                  marginBottom: idx < filteredLogs.length - 1 ? '8px' : '0'
+                }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    background: log.action.includes('Вошёл') ? '#f0fdf4' : 
+                                log.action.includes('Вышел') ? '#fef2f2' : '#fafafa',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: log.action.includes('Вошёл') ? '#16a34a' : 
+                           log.action.includes('Вышел') ? '#dc2626' : '#6b7280'
+                  }}>
+                    <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      {log.action.includes('Вошёл') ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                      ) : log.action.includes('Вышел') ? (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      ) : (
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                      )}
+                    </svg>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '15px', color: '#1a1a1a', fontWeight: '500', marginBottom: '6px' }}>
+                      <strong>{log.fullname}</strong> {log.action.toLowerCase()}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#6b7280' }}>
+                      {new Date(log.created_at).toLocaleString('ru-RU', { 
+                        timeZone: 'Asia/Almaty',
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
   const SellerDashboard = () => (
-    <div className="seller-dashboard">
-      <div className="welcome-section">
-        <div className="section-header">
-          <div className="section-icon">
-            <i className="fas fa-store"></i>
-          </div>
-          <h3>Рабочее место продавца</h3>
+    <div>
+      <div style={{ 
+        background: 'white', 
+        borderRadius: '20px', 
+        boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+        padding: '40px',
+        marginBottom: '28px',
+        textAlign: 'center'
+      }}>
+        <div style={{ 
+          width: '80px', 
+          height: '80px', 
+          background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)', 
+          borderRadius: '50%', 
+          display: 'inline-flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          color: 'white',
+          fontSize: '32px',
+          fontWeight: '700',
+          marginBottom: '20px'
+        }}>
+          {user?.fullname?.[0]?.toUpperCase()}
         </div>
-        <p className="welcome-text">Добро пожаловать в систему продаж qaraa</p>
+        <h2 style={{ fontSize: '28px', fontWeight: '700', color: '#1a1a1a', marginBottom: '8px' }}>
+          Добро пожаловать, {user?.fullname}!
+        </h2>
+        <p style={{ color: '#6b7280', fontSize: '16px' }}>
+          Рабочее место продавца qaraa.crm
+        </p>
       </div>
-      
-      <div className="actions-grid">
-        <div className="action-card">
-          <div className="action-icon">
-            <i className="fas fa-plus-circle"></i>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+        <div style={{
+          background: 'white',
+          borderRadius: '20px',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          padding: '32px',
+          textAlign: 'center',
+          transition: 'all 0.3s',
+          border: '2px solid #e5e7eb'
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.transform = 'translateY(-4px)';
+          e.currentTarget.style.boxShadow = '0 30px 80px rgba(0, 0, 0, 0.12)';
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 20px 60px rgba(0, 0, 0, 0.08)';
+        }}
+        >
+          <div style={{
+            width: '80px',
+            height: '80px',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            borderRadius: '20px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '20px'
+          }}>
+            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="white">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
           </div>
-          <div className="action-content">
-            <h4>Новая продажа</h4>
-            <p>Оформить продажу товара</p>
-            <button className="btn btn-dark" onClick={() => navigate('/new-sale')}>
-              Начать продажу
-            </button>
-          </div>
+          <h3 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a', marginBottom: '12px' }}>
+            Новая продажа
+          </h3>
+          <p style={{ color: '#6b7280', fontSize: '15px', marginBottom: '24px' }}>
+            Оформить продажу товара клиенту
+          </p>
+          <button
+            onClick={() => navigate('/new-sale')}
+            style={{
+              width: '100%',
+              padding: '16px',
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              fontSize: '15px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s'
+            }}
+            onMouseOver={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 10px 30px rgba(16, 185, 129, 0.3)';
+            }}
+            onMouseOut={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            Начать продажу
+          </button>
         </div>
-        
-        <div className="action-card">
-          <div className="action-icon">
-            <i className="fas fa-history"></i>
+
+        <div style={{
+          background: 'white',
+          borderRadius: '20px',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          padding: '32px',
+          textAlign: 'center',
+          transition: 'all 0.3s',
+          border: '2px solid #e5e7eb'
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.transform = 'translateY(-4px)';
+          e.currentTarget.style.boxShadow = '0 30px 80px rgba(0, 0, 0, 0.12)';
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 20px 60px rgba(0, 0, 0, 0.08)';
+        }}
+        >
+          <div style={{
+            width: '80px',
+            height: '80px',
+            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+            borderRadius: '20px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '20px'
+          }}>
+            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="white">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
           </div>
-          <div className="action-content">
-            <h4>История продаж</h4>
-            <p>Просмотр всех продаж</p>
-            <button className="btn btn-dark" onClick={() => navigate('/sales-history')}>
-              Посмотреть историю
-            </button>
-          </div>
+          <h3 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a', marginBottom: '12px' }}>
+            История продаж
+          </h3>
+          <p style={{ color: '#6b7280', fontSize: '15px', marginBottom: '24px' }}>
+            Просмотр всех ваших продаж
+          </p>
+          <button
+            onClick={() => navigate('/sales-history')}
+            style={{
+              width: '100%',
+              padding: '16px',
+              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              fontSize: '15px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s'
+            }}
+            onMouseOver={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 10px 30px rgba(59, 130, 246, 0.3)';
+            }}
+            onMouseOut={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            Посмотреть историю
+          </button>
         </div>
       </div>
     </div>
@@ -476,526 +1059,228 @@ export default function Dashboard({ user, onLogout }) {
   return (
     <>
       <style>{`
-        :root {
-          --bg: #fafafa;
-          --card-bg: #ffffff;
-          --text: #333333;
-          --muted: #888888;
-          --border: #e0e0e0;
-          --dark: #333333;
-          --success: #2ecc71;
-          --danger: #db4437;
-        }
-
-        .dashboard {
-          min-height: 100vh;
-          background: var(--bg);
-        }
-
-        .topbar {
-          background: var(--card-bg);
-          border-bottom: 1px solid var(--border);
-          padding: 16px 24px;
-        }
-
-        .topbar-inner {
-          max-width: 1200px;
-          margin: 0 auto;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .user-section {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .user-avatar {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: #333;
-          color: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .user-info h2 {
-          margin: 0 0 2px 0;
-          font-size: 18px;
-          color: var(--text);
-          font-weight: 600;
-        }
-
-        .user-info p {
-          margin: 0;
-          font-size: 13px;
-          color: var(--muted);
-        }
-
-        .time {
-          color: var(--muted);
-          font-size: 14px;
-          margin-right: 12px;
-        }
-
-        .btn {
-          padding: 10px 16px;
-          border-radius: 6px;
-          border: 1px solid var(--border);
-          background: var(--card-bg);
-          color: var(--text);
-          cursor: pointer;
-          font-size: 14px;
-          transition: all .2s;
-        }
-
-        .btn:hover {
-          background: #f5f5f5;
-          border-color: #bbb;
-        }
-
-        .btn-dark {
-          background: var(--dark);
-          color: #fff;
-          border: none;
-        }
-
-        .btn-dark:hover {
-          background: #555;
-        }
-
-        .btn-success {
-          background: var(--success);
-          color: #fff;
-          border: none;
-        }
-
-        .btn-success:hover {
-          background: #27ae60;
-        }
-
-        .btn-danger {
-          background: var(--card-bg);
-          color: var(--danger);
-          border: 1px solid #f0c3bf;
-        }
-
-        .btn-danger:hover {
-          background: #fdecea;
-          border-color: #f1a199;
-        }
-
-        .dashboard-content {
-          padding: 24px;
-        }
-
-        .container {
-          max-width: 1200px;
-          margin: 0 auto;
-        }
-
-        .nav-tabs {
-          background: var(--card-bg);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          display: flex;
-          overflow: hidden;
-          margin-bottom: 16px;
-        }
-
-        .nav-tab {
-          flex: 1;
-          padding: 12px 16px;
-          background: transparent;
-          border: none;
-          cursor: pointer;
-          font-size: 14px;
-          color: var(--muted);
-          transition: background .2s, color .2s;
-        }
-
-        .nav-tab:hover {
-          background: #f5f5f5;
-          color: var(--text);
-        }
-
-        .nav-tab.active {
-          background: var(--dark);
-          color: #fff;
-        }
-
-        .tab-content {
-          background: var(--card-bg);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 24px;
-        }
-
-        .stats-container {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 16px;
-          margin-bottom: 24px;
-        }
-
-        .stat-card {
-          background: var(--card-bg);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 16px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-        }
-
-        .stat-icon {
-          width: 40px;
-          height: 40px;
-          border-radius: 8px;
-          background: #f5f5f5;
-          color: var(--dark);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .stat-number {
-          font-size: 22px;
-          font-weight: 700;
-          color: var(--text);
-          margin-bottom: 2px;
-        }
-
-        .stat-label {
-          font-size: 13px;
-          color: var(--muted);
-        }
-
-        .main-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 16px;
-        }
-
-        .section-header {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          margin-bottom: 16px;
-          padding-bottom: 12px;
-          border-bottom: 1px solid var(--border);
-        }
-
-        .section-icon {
-          width: 40px;
-          height: 40px;
-          border-radius: 8px;
-          background: #f5f5f5;
-          color: var(--dark);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .section-header h3 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 600;
-          color: var(--text);
-          flex: 1;
-        }
-
-        .activity-list, .online-list, .logs-list {
-          max-height: 400px;
-          overflow-y: auto;
-        }
-
-        .activity-item, .online-item, .log-item {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px 0;
-          border-bottom: 1px solid var(--border);
-        }
-
-        .activity-item:last-child, .online-item:last-child, .log-item:last-child {
-          border-bottom: none;
-        }
-
-        .activity-avatar, .log-icon {
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          background: #f5f5f5;
-          color: var(--dark);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .activity-text, .log-text {
-          color: var(--text);
-          margin-bottom: 2px;
-        }
-
-        .activity-time, .log-time {
-          color: var(--muted);
-          font-size: 12px;
-        }
-
-        .online-avatar {
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          background: #333;
-          color: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .online-info {
-          flex: 1;
-        }
-
-        .online-name {
-          font-weight: 600;
-          color: var(--text);
-          margin-bottom: 2px;
-        }
-
-        .online-username {
-          font-size: 13px;
-          color: var(--muted);
-        }
-
-        .status-indicator.online {
-          width: 10px;
-          height: 10px;
-          border-radius: 50%;
-          background: var(--success);
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 24px;
-          color: var(--muted);
-        }
-
-        .sellers-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-          gap: 16px;
-        }
-
-        .seller-card {
-          background: var(--card-bg);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 16px;
-        }
-
-        .seller-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-
-        .seller-avatar {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: #333;
-          color: #fff;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .seller-status {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 6px 10px;
-          border-radius: 14px;
-          font-size: 12px;
-          border: 1px solid var(--border);
-          color: var(--muted);
-          background: #fff;
-        }
-
-        .seller-status.online {
-          color: var(--success);
-          border-color: #cfe9dc;
-          background: #f3fbf6;
-        }
-
-        .seller-status.offline {
-          color: var(--muted);
-        }
-
-        .seller-name {
-          font-size: 16px;
-          font-weight: 600;
-          color: var(--text);
-          margin-bottom: 4px;
-        }
-
-        .seller-username, .seller-email {
-          font-size: 13px;
-          color: var(--muted);
-        }
-
-        .seller-actions {
-          margin-top: 12px;
-          padding-top: 12px;
-          border-top: 1px solid var(--border);
-        }
-
-        .filter-buttons {
-          display: flex;
-          gap: 8px;
-          margin-left: auto;
-        }
-
-        .filter-btn {
-          padding: 8px 12px;
-          border-radius: 6px;
-          border: 1px solid var(--border);
-          background: #fff;
-          color: var(--text);
-          cursor: pointer;
-          font-size: 13px;
-          transition: all .2s;
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .filter-btn:hover {
-          background: #f5f5f5;
-        }
-
-        .filter-btn.active {
-          background: var(--dark);
-          color: #fff;
-          border-color: var(--dark);
-        }
-
-        .welcome-text {
-          color: var(--muted);
-          font-size: 14px;
-          margin-top: 6px;
-        }
-
-        .actions-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 16px;
-        }
-
-        .action-card {
-          background: var(--card-bg);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 20px;
-          text-align: center;
-        }
-
-        .action-icon {
-          width: 64px;
-          height: 64px;
-          border-radius: 50%;
-          background: #f5f5f5;
-          color: var(--dark);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin: 0 auto 12px;
-          font-size: 24px;
-        }
-
-        footer.simple {
-          text-align: center;
-          padding: 12px;
-          font-size: 13px;
-          color: #666;
-          border-top: 1px solid #ddd;
-          background: #f9f9f9;
-          margin-top: 16px;
-        }
-
-        @media (max-width: 768px) {
-          .main-grid {
-            grid-template-columns: 1fr;
-          }
-          .nav-tabs {
-            flex-direction: column;
-          }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
 
-      <div className="dashboard">
-        <div className="topbar">
-          <div className="topbar-inner">
-            <div className="user-section">
-              <div className="user-avatar"><i className="fas fa-user"></i></div>
-              <div className="user-info">
-                <h2>{user.fullname}</h2>
-                <p>{user.role === 'owner' ? 'Владелец системы' : 'Продавец'} • {user.username}</p>
+      <div style={{ 
+        minHeight: '100vh', 
+        background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)' 
+      }}>
+        <div style={{ 
+          background: 'white', 
+          borderBottom: '2px solid #e5e7eb',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)'
+        }}>
+          <div style={{ 
+            maxWidth: '1400px', 
+            margin: '0 auto', 
+            padding: '20px 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '16px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{
+                width: '56px',
+                height: '56px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '24px',
+                fontWeight: '700'
+              }}>
+                {user?.fullname?.[0]?.toUpperCase()}
+              </div>
+              <div>
+                <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#1a1a1a', marginBottom: '4px' }}>
+                  {user?.fullname}
+                </h2>
+                <p style={{ fontSize: '14px', color: '#6b7280', fontWeight: '500' }}>
+                  {user?.role === 'owner' ? 'Владелец системы' : 'Продавец'} • @{user?.username}
+                </p>
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span className="time">{formatTime(currentTime)}</span>
-              <button className="btn btn-dark" onClick={handleLogout}>
-                <i className="fas fa-sign-out-alt"></i>
+            
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <span style={{ 
+                fontSize: '16px', 
+                color: '#6b7280', 
+                fontWeight: '600',
+                fontVariantNumeric: 'tabular-nums'
+              }}>
+                {formatTime(currentTime)}
+              </span>
+              <button
+                onClick={handleLogout}
+                style={{
+                  padding: '12px 24px',
+                  background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '10px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.2)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
                 Выйти
               </button>
             </div>
           </div>
         </div>
 
-        <div className="dashboard-content">
-          <div className="container">
-            {user.role === 'owner' ? (
+        <div style={{ padding: '24px' }}>
+          <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+            {user?.role === 'owner' ? (
               <>
-                <div className="nav-tabs">
-                  <button className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
-                    <i className="fas fa-chart-pie"></i> Обзор
+                <div style={{ 
+                  background: 'white', 
+                  borderRadius: '16px', 
+                  padding: '8px',
+                  marginBottom: '24px',
+                  boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
+                  display: 'flex',
+                  gap: '8px',
+                  flexWrap: 'wrap'
+                }}>
+                  <button
+                    onClick={() => setActiveTab('overview')}
+                    style={{
+                      flex: 1,
+                      minWidth: '140px',
+                      padding: '14px 20px',
+                      background: activeTab === 'overview' ? 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' : 'transparent',
+                      color: activeTab === 'overview' ? 'white' : '#6b7280',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                    </svg>
+                    Продавцы
                   </button>
-                  <button className={`nav-tab ${activeTab === 'sellers' ? 'active' : ''}`} onClick={() => setActiveTab('sellers')}>
-                    <i className="fas fa-users"></i> Продавцы
+                  <button
+                    onClick={() => setActiveTab('logs')}
+                    style={{
+                      flex: 1,
+                      minWidth: '140px',
+                      padding: '14px 20px',
+                      background: activeTab === 'logs' ? 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' : 'transparent',
+                      color: activeTab === 'logs' ? 'white' : '#6b7280',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Журнал
                   </button>
-                  <button className={`nav-tab ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')}>
-                    <i className="fas fa-file-alt"></i> Журнал
-                  </button>
-                  <button className={`nav-tab`} onClick={() => navigate('/adminpanel')}>
-                    <i className="fas fa-crown"></i> Админ-панель
+                  <button
+                    onClick={() => navigate('/adminpanel')}
+                    style={{
+                      flex: 1,
+                      minWidth: '140px',
+                      padding: '14px 20px',
+                      background: 'transparent',
+                      color: '#6b7280',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}
+                    onMouseOver={(e) => e.target.style.background = '#f9fafb'}
+                    onMouseOut={(e) => e.target.style.background = 'transparent'}
+                  >
+                    <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    Админ-панель
                   </button>
                 </div>
 
-                <div className="tab-content">
+                <div style={{ 
+                  background: 'white', 
+                  borderRadius: '20px', 
+                  boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+                  padding: '32px'
+                }}>
                   {activeTab === 'overview' && <OverviewTab />}
                   {activeTab === 'sellers' && <SellersTab />}
                   {activeTab === 'logs' && <LogsTab />}
                 </div>
               </>
             ) : (
-              <div className="tab-content">
+              <div style={{ 
+                background: 'white', 
+                borderRadius: '20px', 
+                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+                padding: '32px'
+              }}>
                 <SellerDashboard />
               </div>
             )}
-          </div>
 
-          <footer className="simple">
-            © qaraa.kz | Система безопасного доступа, 2025. <br />
-            Последнее обновление: 02.10.2025 | srk.
-          </footer>
+            <footer style={{
+              textAlign: 'center',
+              padding: '24px',
+              fontSize: '14px',
+              color: '#6b7280',
+              marginTop: '32px'
+            }}>
+              © qaraa.crm | powered by Jarvis. Система безопасного доступа, 2025.<br />
+              Последнее обновление: 05.10.2025 | srk.
+            </footer>
+          </div>
         </div>
       </div>
     </>

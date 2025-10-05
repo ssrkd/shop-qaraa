@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
-import kaspiLogo from '../images/kaspi.svg';
-import halykLogo from '../images/halyk.svg';
-import cashLogo from '../images/cash.png';
 
 export default function SalesHistory({ user }) {
   const [sales, setSales] = useState([]);
@@ -27,7 +24,7 @@ export default function SalesHistory({ user }) {
     const endOfDayUTC = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
     endOfDayUTC.setMinutes(endOfDayUTC.getMinutes() - tzOffset);
 
-    const { data: salesData, error: salesError } = await supabase
+    const { data, error } = await supabase
       .from('sales')
       .select('*')
       .eq('seller_id', user.fullname)
@@ -35,40 +32,21 @@ export default function SalesHistory({ user }) {
       .lte('created_at', endOfDayUTC.toISOString())
       .order('created_at', { ascending: false });
 
-    if (salesError) {
-      console.error(salesError);
-      alert('Ошибка при загрузке продаж: ' + salesError.message);
+    if (error) {
+      console.error(error);
+      alert('Ошибка при загрузке продаж: ' + error.message);
     } else {
-      setSales(salesData);
-
-      // --- Считаем общие суммы ---
+      setSales(data);
       let sumAmount = 0;
       let sumQuantity = 0;
-      salesData.forEach(sale => {
+      data.forEach(sale => {
         sumAmount += parseFloat(sale.price) * sale.quantity;
         sumQuantity += sale.quantity;
       });
-
       setTotalAmount(sumAmount);
       setTotalQuantity(sumQuantity);
     }
-
     setLoading(false);
-  }
-
-  function PaymentIcon({ method }) {
-    if (!method) return <span>—</span>;
-    const normalized = method.trim().toLowerCase();
-    if (normalized.includes('kaspi')) {
-      return <img src={kaspiLogo} alt={method} style={{ width: 24, height: 24 }} />;
-    }
-    if (normalized.includes('halyk')) {
-      return <img src={halykLogo} alt={method} style={{ width: 24, height: 24 }} />;
-    }
-    if (normalized.includes('нал')) {
-      return <img src={cashLogo} alt={method} style={{ width: 34, height: 34 }} />;
-    }
-    return <span>{method}</span>;
   }
 
   const printReceipt = (sale) => {
@@ -100,11 +78,11 @@ export default function SalesHistory({ user }) {
               border-bottom: 2px dashed #e5e7eb;
             }
             .logo {
-              font-size: 28px;
+              font-size: 36px;
               font-weight: 700;
               color: #1a1a1a;
-              margin-bottom: 5px;
-              letter-spacing: -1px;
+              margin-bottom: 8px;
+              letter-spacing: -1.5px;
             }
             .title {
               font-size: 14px;
@@ -185,12 +163,6 @@ export default function SalesHistory({ user }) {
                 <span>Цена за единицу:</span>
                 <span style="font-weight: 600;">${sale.price} ₸</span>
               </div>
-              <div class="info-row">
-                <span class="info-label">Способ оплаты:</span>
-                <span class="info-value">
-                ${sale.payment_method}
-                </span>
-              </div>
             </div>
             <div class="total-section">
               <div class="total">
@@ -218,8 +190,9 @@ export default function SalesHistory({ user }) {
     return (
       <>
         <style>{`
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
           @keyframes spin { to { transform: rotate(360deg); } }
-          @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         `}</style>
         <div style={{ 
           minHeight: '100vh', 
@@ -230,15 +203,15 @@ export default function SalesHistory({ user }) {
         }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ 
-              width: '50px', 
-              height: '50px', 
-              border: '4px solid rgba(0,0,0,0.1)', 
+              width: '40px', 
+              height: '40px', 
+              border: '3px solid rgba(26,26,26,0.1)', 
               borderTopColor: '#1a1a1a', 
               borderRadius: '50%', 
-              margin: '0 auto 20px', 
+              margin: '0 auto 16px', 
               animation: 'spin 1s linear infinite' 
             }}></div>
-            <p style={{ color: '#6b7280', fontSize: '16px', fontWeight: '500', animation: 'pulse 1.5s ease-in-out infinite' }}>
+            <p style={{ color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
               Загрузка данных...
             </p>
           </div>
@@ -263,29 +236,21 @@ export default function SalesHistory({ user }) {
           background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', 
           padding: '24px' 
         }}>
-          <div style={{ maxWidth: '900px', margin: '0 auto', animation: 'fadeIn 0.6s ease' }}>
+          <div style={{ maxWidth: '800px', margin: '0 auto', animation: 'fadeIn 0.6s ease' }}>
             
             <div style={{ 
-              background: 'white', 
+              background: '#ffffff', 
               borderRadius: '20px', 
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)', 
-              overflow: 'hidden' 
+              overflow: 'hidden',
+              backdropFilter: 'blur(10px)'
             }}>
               
-              <div style={{ 
-                padding: '32px', 
-                background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
-                color: 'white'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <h2 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.5px' }}>
-                    Детали продажи #{selectedSale.id}
-                  </h2>
-                </div>
-                <p style={{ opacity: 0.8, fontSize: '14px' }}>
+              <div style={{ padding: '32px 36px', borderBottom: '1px solid #e5e7eb' }}>
+                <h2 style={{ margin: '0 0 8px 0', color: '#1a1a1a', fontSize: '24px', fontWeight: '600' }}>
+                  Детали продажи #{selectedSale.id}
+                </h2>
+                <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>
                   {new Date(selectedSale.created_at).toLocaleString('ru-RU', { 
                     year: 'numeric', month: 'long', day: 'numeric',
                     hour: '2-digit', minute: '2-digit'
@@ -293,126 +258,68 @@ export default function SalesHistory({ user }) {
                 </p>
               </div>
 
-              <div style={{ padding: '32px' }}>
+              <div style={{ padding: '32px 36px' }}>
                 
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-                  gap: '16px', 
-                  marginBottom: '24px' 
-                }}>
-                  <div style={{ 
-                    padding: '20px', 
-                    background: '#fafafa', 
-                    borderRadius: '12px',
-                    border: '2px solid #e5e7eb',
-                    transition: 'all 0.3s'
-                  }}>
-                    <p style={{ marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+                  <div style={{ padding: '20px', background: '#fafafa', borderRadius: '12px', border: '2px solid #e5e7eb' }}>
+                    <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Продавец
                     </p>
-                    <p style={{ fontSize: '18px', color: '#1a1a1a', fontWeight: '600' }}>
+                    <p style={{ margin: 0, fontSize: '16px', color: '#1a1a1a', fontWeight: '600' }}>
                       {selectedSale.seller_id}
                     </p>
                   </div>
 
-                  <div style={{ 
-                    padding: '20px', 
-                    background: '#fafafa', 
-                    borderRadius: '12px',
-                    border: '2px solid #e5e7eb'
-                  }}>
-                    <p style={{ marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                  <div style={{ padding: '20px', background: '#fafafa', borderRadius: '12px', border: '2px solid #e5e7eb' }}>
+                    <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Товар
                     </p>
-                    <p style={{ fontSize: '18px', color: '#1a1a1a', fontWeight: '600' }}>
+                    <p style={{ margin: 0, fontSize: '16px', color: '#1a1a1a', fontWeight: '600' }}>
                       {selectedSale.product}
                     </p>
                   </div>
                 </div>
 
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(3, 1fr)', 
-                  gap: '16px', 
-                  marginBottom: '28px' 
-                }}>
-                  <div style={{ 
-                    padding: '24px', 
-                    background: '#fafafa', 
-                    borderRadius: '12px', 
-                    textAlign: 'center',
-                    border: '2px solid #e5e7eb'
-                  }}>
-                    <p style={{ marginBottom: '12px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                  <div style={{ padding: '20px', background: '#fafafa', borderRadius: '12px', textAlign: 'center', border: '2px solid #e5e7eb' }}>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Размер
                     </p>
-                    <p style={{ fontSize: '32px', fontWeight: '700', color: '#1a1a1a' }}>
+                    <p style={{ margin: 0, fontSize: '28px', fontWeight: '700', color: '#1a1a1a' }}>
                       {selectedSale.size}
                     </p>
                   </div>
 
-                  <div style={{ 
-                    padding: '24px', 
-                    background: '#fafafa', 
-                    borderRadius: '12px', 
-                    textAlign: 'center',
-                    border: '2px solid #e5e7eb'
-                  }}>
-                    <p style={{ marginBottom: '12px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600' }}>
+                  <div style={{ padding: '20px', background: '#fafafa', borderRadius: '12px', textAlign: 'center', border: '2px solid #e5e7eb' }}>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Количество
                     </p>
-                    <p style={{ fontSize: '32px', fontWeight: '700', color: '#1a1a1a' }}>
+                    <p style={{ margin: 0, fontSize: '28px', fontWeight: '700', color: '#1a1a1a' }}>
                       {selectedSale.quantity}
                     </p>
                   </div>
 
-                  <div style={{ 
-                    padding: '24px', 
-                    background: '#fafafa', 
-                    borderRadius: '12px', 
-                    textAlign: 'center',
-                    border: '2px solid #e5e7eb'
-                  }}>
-                    <p style={{ marginBottom: '12px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600' }}>
+                  <div style={{ padding: '20px', background: '#fafafa', borderRadius: '12px', textAlign: 'center', border: '2px solid #e5e7eb' }}>
+                    <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Цена
                     </p>
-                    <p style={{ fontSize: '32px', fontWeight: '700', color: '#1a1a1a' }}>
+                    <p style={{ margin: 0, fontSize: '28px', fontWeight: '700', color: '#1a1a1a' }}>
                       {selectedSale.price} ₸
                     </p>
                   </div>
-
-                  <div style={{ 
-  padding: '24px', 
-  background: '#fafafa', 
-  borderRadius: '12px', 
-  textAlign: 'center',
-  border: '2px solid #e5e7eb'
-}}>
-  <p style={{ marginBottom: '12px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600' }}>
-    Способ оплаты
-  </p>
-  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-  <PaymentIcon method={selectedSale.payment_method} />
-<span style={{ fontSize: '18px', fontWeight: '600', color: '#1a1a1a' }}>
-  {selectedSale.payment_method}
-</span>
-  </div>
-</div>
                 </div>
 
                 <div style={{ 
-                  padding: '32px', 
+                  padding: '28px', 
                   background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)', 
-                  borderRadius: '16px', 
+                  borderRadius: '12px', 
                   textAlign: 'center', 
-                  marginBottom: '28px',
-                  boxShadow: '0 10px 30px rgba(0, 0, 0, 0.2)'
+                  marginBottom: '28px'
                 }}>
-                  <p style={{ marginBottom: '12px', fontSize: '14px', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '1px' }}>
+                  <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                     Итого к оплате
                   </p>
-                  <p style={{ fontSize: '48px', fontWeight: '700', color: 'white', letterSpacing: '-1px' }}>
+                  <p style={{ margin: 0, fontSize: '36px', fontWeight: '700', color: 'white' }}>
                     {(parseFloat(selectedSale.price) * selectedSale.quantity).toLocaleString()} ₸
                   </p>
                 </div>
@@ -428,14 +335,12 @@ export default function SalesHistory({ user }) {
                       color: 'white',
                       border: 'none',
                       borderRadius: '12px',
-                      fontSize: '15px',
+                      fontSize: '16px',
                       fontWeight: '600',
                       cursor: 'pointer',
                       transition: 'all 0.3s',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px'
+                      position: 'relative',
+                      overflow: 'hidden'
                     }}
                     onMouseOver={(e) => {
                       e.target.style.transform = 'translateY(-2px)';
@@ -446,9 +351,6 @@ export default function SalesHistory({ user }) {
                       e.target.style.boxShadow = 'none';
                     }}
                   >
-                    <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
                     Распечатать чек
                   </button>
                   <button
@@ -459,7 +361,7 @@ export default function SalesHistory({ user }) {
                       color: '#1a1a1a',
                       border: '2px solid #e5e7eb',
                       borderRadius: '12px',
-                      fontSize: '15px',
+                      fontSize: '16px',
                       fontWeight: '600',
                       cursor: 'pointer',
                       transition: 'all 0.3s'
@@ -499,14 +401,14 @@ export default function SalesHistory({ user }) {
         background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', 
         padding: '24px' 
       }}>
-        <div style={{ maxWidth: '1400px', margin: '0 auto', animation: 'fadeIn 0.6s ease' }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', animation: 'fadeIn 0.6s ease' }}>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
             <div>
-              <h1 style={{ fontSize: '36px', fontWeight: '700', color: '#1a1a1a', marginBottom: '8px', letterSpacing: '-1px' }}>
+              <h1 style={{ fontSize: '36px', fontWeight: '700', color: '#1a1a1a', marginBottom: '8px', letterSpacing: '-1.5px' }}>
                 История продаж
               </h1>
-              <p style={{ color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
+              <p style={{ color: '#6b7280', fontSize: '14px', fontWeight: '400' }}>
                 {new Date().toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' })}
               </p>
             </div>
@@ -514,18 +416,17 @@ export default function SalesHistory({ user }) {
             <button
               onClick={() => navigate('/dashboard')}
               style={{
-                padding: '14px 28px',
+                padding: '16px',
                 background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
                 color: 'white',
                 border: 'none',
                 borderRadius: '12px',
-                fontSize: '15px',
+                fontSize: '16px',
                 fontWeight: '600',
                 cursor: 'pointer',
                 transition: 'all 0.3s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
+                position: 'relative',
+                overflow: 'hidden'
               }}
               onMouseOver={(e) => {
                 e.target.style.transform = 'translateY(-2px)';
@@ -536,105 +437,57 @@ export default function SalesHistory({ user }) {
                 e.target.style.boxShadow = 'none';
               }}
             >
-              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
               На главную
             </button>
           </div>
 
           <div style={{ 
             display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
             gap: '20px', 
-            marginBottom: '28px' 
+            marginBottom: '24px' 
           }}>
             <div style={{ 
               padding: '28px', 
-              background: 'white', 
+              background: '#ffffff', 
               borderRadius: '20px', 
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
-              border: '2px solid #e5e7eb'
+              backdropFilter: 'blur(10px)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                <div style={{ 
-                  width: '48px', 
-                  height: '48px', 
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
-                  borderRadius: '12px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center' 
-                }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
-                  Общая сумма
-                </p>
-              </div>
-              <p style={{ fontSize: '40px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                Общая сумма
+              </p>
+              <p style={{ margin: 0, fontSize: '36px', fontWeight: '700', color: '#1a1a1a' }}>
                 {totalAmount.toLocaleString()} ₸
               </p>
             </div>
 
             <div style={{ 
               padding: '28px', 
-              background: 'white', 
+              background: '#ffffff', 
               borderRadius: '20px', 
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
-              border: '2px solid #e5e7eb'
+              backdropFilter: 'blur(10px)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                <div style={{ 
-                  width: '48px', 
-                  height: '48px', 
-                  background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', 
-                  borderRadius: '12px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center' 
-                }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                  </svg>
-                </div>
-                <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
-                  Продано товаров
-                </p>
-              </div>
-              <p style={{ fontSize: '40px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                Продано товаров
+              </p>
+              <p style={{ margin: 0, fontSize: '36px', fontWeight: '700', color: '#1a1a1a' }}>
                 {totalQuantity}
               </p>
             </div>
 
             <div style={{ 
               padding: '28px', 
-              background: 'white', 
+              background: '#ffffff', 
               borderRadius: '20px', 
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
-              border: '2px solid #e5e7eb'
+              backdropFilter: 'blur(10px)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-                <div style={{ 
-                  width: '48px', 
-                  height: '48px', 
-                  background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', 
-                  borderRadius: '12px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'center' 
-                }}>
-                  <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                  </svg>
-                </div>
-                <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
-                  Количество продаж
-                </p>
-              </div>
-              <p style={{ fontSize: '40px', fontWeight: '700', color: '#1a1a1a', letterSpacing: '-1px' }}>
+              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                Количество продаж
+              </p>
+              <p style={{ margin: 0, fontSize: '36px', fontWeight: '700', color: '#1a1a1a' }}>
                 {sales.length}
               </p>
             </div>
@@ -642,44 +495,46 @@ export default function SalesHistory({ user }) {
 
           {sales.length === 0 ? (
             <div style={{ 
-              background: 'white', 
+              background: '#ffffff', 
               borderRadius: '20px', 
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)', 
-              padding: '80px 24px', 
-              textAlign: 'center' 
+              padding: '64px 24px', 
+              textAlign: 'center',
+              backdropFilter: 'blur(10px)'
             }}>
               <div style={{ 
-                width: '80px', 
-                height: '80px', 
+                width: '64px', 
+                height: '64px', 
                 background: '#fafafa', 
                 borderRadius: '50%', 
                 display: 'inline-flex', 
                 alignItems: 'center', 
                 justifyContent: 'center', 
-                marginBottom: '20px' 
+                marginBottom: '16px',
+                fontSize: '32px',
+                color: '#9ca3af'
               }}>
-                <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#9ca3af">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-                </svg>
+                ∅
               </div>
-              <h3 style={{ fontSize: '22px', color: '#1a1a1a', fontWeight: '600', marginBottom: '12px' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '24px', color: '#1a1a1a', fontWeight: '600' }}>
                 Нет данных
               </h3>
-              <p style={{ color: '#6b7280', fontSize: '15px', fontWeight: '500' }}>
+              <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>
                 Сегодня продажи еще не зарегистрированы
               </p>
             </div>
           ) : (
             <div style={{ 
-              background: 'white', 
+              background: '#ffffff', 
               borderRadius: '20px', 
               boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)', 
-              overflow: 'hidden' 
+              overflow: 'hidden',
+              backdropFilter: 'blur(10px)'
             }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: '#fafafa', borderBottom: '2px solid #e5e7eb' }}>
+                    <tr style={{ background: '#fafafa', borderBottom: '1px solid #e5e7eb' }}>
                       <th style={{ padding: '20px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                         ID
                       </th>
@@ -696,9 +551,6 @@ export default function SalesHistory({ user }) {
                         Сумма
                       </th>
                       <th style={{ padding: '20px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-  Оплата
-</th>
-                      <th style={{ padding: '20px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                         Время
                       </th>
                       <th style={{ padding: '20px', textAlign: 'right', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -711,13 +563,13 @@ export default function SalesHistory({ user }) {
                       <tr 
                         key={sale.id}
                         style={{ 
-                          borderBottom: index !== sales.length - 1 ? '1px solid #f3f4f6' : 'none', 
-                          transition: 'background 0.2s' 
+                          borderBottom: index !== sales.length - 1 ? '1px solid #e5e7eb' : 'none', 
+                          transition: 'background 0.15s' 
                         }}
                         onMouseOver={(e) => e.currentTarget.style.background = '#fafafa'}
                         onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
                       >
-                        <td style={{ padding: '20px', color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
+                        <td style={{ padding: '20px', color: '#6b7280', fontSize: '14px' }}>
                           #{sale.id}
                         </td>
                         <td style={{ padding: '20px', color: '#1a1a1a', fontSize: '15px', fontWeight: '600' }}>
@@ -725,11 +577,11 @@ export default function SalesHistory({ user }) {
                         </td>
                         <td style={{ padding: '20px' }}>
                           <span style={{ 
-                            padding: '6px 14px', 
+                            padding: '6px 12px', 
                             background: '#fafafa', 
                             color: '#374151', 
                             borderRadius: '8px', 
-                            fontSize: '14px',
+                            fontSize: '13px',
                             fontWeight: '600',
                             border: '2px solid #e5e7eb'
                           }}>
@@ -739,14 +591,10 @@ export default function SalesHistory({ user }) {
                         <td style={{ padding: '20px', color: '#1a1a1a', fontSize: '15px', fontWeight: '600' }}>
                           {sale.quantity}
                         </td>
-                        <td style={{ padding: '20px', color: '#1a1a1a', fontWeight: '700', fontSize: '16px' }}>
+                        <td style={{ padding: '20px', color: '#1a1a1a', fontWeight: '600', fontSize: '15px' }}>
                           {(parseFloat(sale.price) * sale.quantity).toLocaleString()} ₸
                         </td>
-                        <td style={{ padding: '20px', color: '#6b7280', fontSize: '14px', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <PaymentIcon method={sale.payment_method} />
-                        <span>{sale.payment_method}</span>
-</td>
-                        <td style={{ padding: '20px', color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
+                        <td style={{ padding: '20px', color: '#6b7280', fontSize: '14px' }}>
                           {new Date(sale.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                         </td>
                         <td style={{ padding: '20px', textAlign: 'right' }}>
@@ -757,7 +605,7 @@ export default function SalesHistory({ user }) {
                               background: 'white',
                               color: '#1a1a1a',
                               border: '2px solid #e5e7eb',
-                              borderRadius: '10px',
+                              borderRadius: '8px',
                               fontSize: '14px',
                               fontWeight: '600',
                               cursor: 'pointer',
@@ -787,3 +635,4 @@ export default function SalesHistory({ user }) {
     </>
   );
 }
+                            

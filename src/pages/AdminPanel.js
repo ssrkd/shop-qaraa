@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
 import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { saveAs } from "file-saver";
 
 export default function AdminPanel({ onBack, user }) {
@@ -16,6 +14,9 @@ export default function AdminPanel({ onBack, user }) {
   const [products, setProducts] = useState([]);
   const [foundProduct, setFoundProduct] = useState(null);
   const [step, setStep] = useState("barcode");
+  const [profit, setProfit] = useState(0);
+  const [profitPeriod, setProfitPeriod] = useState("today");
+  const [profitPaymentType, setProfitPaymentType] = useState("all");
 
   const [form, setForm] = useState({
     barcode: "",
@@ -64,6 +65,12 @@ export default function AdminPanel({ onBack, user }) {
     }
   }, [form.barcode, activeTab, step]);
 
+  useEffect(() => {
+    if (activeTab === "profit") {
+      fetchProfit(profitPeriod, profitPaymentType);
+    }
+  }, [activeTab, profitPeriod, profitPaymentType]);
+
   async function fetchSales() {
     const { data, error } = await supabase
       .from("sales")
@@ -78,6 +85,77 @@ export default function AdminPanel({ onBack, user }) {
       .select("id, name, barcode, product_variants(id, size, quantity, price)")
       .order("id");
     if (!error) setProducts(data);
+  }
+
+  async function fetchProfit(period, paymentType = "all") {
+    let startDateUTC, endDateUTC;
+    const now = new Date();
+  
+    switch (period) {
+      case "today":
+        startDateUTC = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+        endDateUTC = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999));
+        break;
+      case "yesterday":
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        startDateUTC = new Date(Date.UTC(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate()));
+        endDateUTC = new Date(Date.UTC(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate(), 23, 59, 59, 999));
+        break;
+      case "week":
+        const day = now.getUTCDay();
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        const monday = new Date(now);
+        monday.setUTCDate(now.getUTCDate() - diffToMonday);
+        startDateUTC = new Date(Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate()));
+        endDateUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+        break;
+      case "month":
+        startDateUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+        endDateUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+        break;
+      case "year":
+        startDateUTC = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+        endDateUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+        break;
+      case "all":
+        startDateUTC = new Date(Date.UTC(2000, 0, 1));
+        endDateUTC = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+        break;
+      default:
+        return;
+    }
+  
+    const methodMapping = {
+      kaspi: "Kaspi QR",
+      halyk: "Halyk QR | Карта",
+      cash: "Наличные",
+    };
+  
+    let query = supabase
+      .from("sales")
+      .select("price, quantity, payment_method, created_at")
+      .gte("created_at", startDateUTC.toISOString())
+      .lte("created_at", endDateUTC.toISOString());
+  
+    if (paymentType !== "all") {
+      query = query.eq("payment_method", methodMapping[paymentType]);
+    }
+  
+    const { data, error } = await query;
+  
+    if (error) {
+      console.error("Ошибка при подсчете прибыли:", error);
+      return;
+    }
+  
+    const total = data.reduce((sum, sale) => {
+      const price = parseFloat(sale.price) || 0;
+      const qty = parseInt(sale.quantity) || 0;
+      return sum + price * qty;
+    }, 0);
+  
+    setProfit(total);
   }
 
   async function checkBarcode() {
@@ -112,33 +190,10 @@ export default function AdminPanel({ onBack, user }) {
 
   function exportToExcel(data, sheetName = "Sheet1", fileName = "data.xlsx") {
     if (!data || !data.length) return;
-
     const ws = XLSX.utils.json_to_sheet(data);
-
-    const cols = Object.keys(data[0]).map((key) => {
-      const maxLength = data.reduce((max, row) => {
-        const value = row[key] ? row[key].toString() : "";
-        return Math.max(max, value.length);
-      }, key.length);
-      return { wch: maxLength + 2 };
-    });
-    ws["!cols"] = cols;
-
-    const colKeys = Object.keys(data[0]);
-    const sizeColIndex = colKeys.indexOf("Размер");
-    const qtyColIndex = colKeys.indexOf("Количество");
-
-    Object.keys(ws).forEach((cell) => {
-      if (cell[0] === "!") return;
-      const col = XLSX.utils.decode_cell(cell).c;
-      if (col === sizeColIndex || col === qtyColIndex) {
-        ws[cell].s = { alignment: { horizontal: "center", vertical: "center" } };
-      }
-    });
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
   }
 
@@ -156,32 +211,6 @@ export default function AdminPanel({ onBack, user }) {
     exportToExcel(salesData, "Продажи", "sales.xlsx");
   }
 
-  function handleExportSalesPDF() {
-    const doc = new jsPDF({ orientation: 'landscape' });
-    const tableColumn = ["ID", "Продавец", "Товар", "Штрихкод", "Размер", "Кол-во", "Цена", "Дата"];
-    const tableRows = sales.map((s) => [
-      s.id ?? "",
-      s.seller_id ?? "",
-      s.product ?? "",
-      s.barcode ?? "",
-      s.size ?? "",
-      s.quantity ?? 0,
-      s.price ?? 0,
-      s.created_at ? new Date(s.created_at).toLocaleString("ru-RU") : ""
-    ]);
-
-    doc.setFontSize(14);
-    doc.text("Отчет по продажам", 14, 16);
-    autoTable(doc, {
-      head: [tableColumn],
-      body: tableRows,
-      startY: 20,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [51, 51, 51] }
-    });
-    doc.save("sales.pdf");
-  }
-
   function handleExportProducts() {
     const productsData = [];
     products.forEach(p => {
@@ -197,35 +226,6 @@ export default function AdminPanel({ onBack, user }) {
       });
     });
     exportToExcel(productsData, "Товары", "products.xlsx");
-  }
-
-  function handleExportProductsPDF() {
-    const doc = new jsPDF({ orientation: 'landscape' });
-    const tableColumn = ["ID", "Название", "Штрихкод", "Размер", "Остаток", "Цена"];
-    const tableRows = [];
-    products.forEach((p) => {
-      p.product_variants.forEach((v) => {
-        tableRows.push([
-          p.id ?? "",
-          p.name ?? "",
-          p.barcode ?? "",
-          v.size ?? "",
-          v.quantity ?? 0,
-          v.price ?? 0,
-        ]);
-      });
-    });
-
-    doc.setFontSize(14);
-    doc.text("Список товаров", 14, 16);
-    autoTable(doc, {
-      head: [tableColumn],
-      body: tableRows,
-      startY: 20,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [51, 51, 51] }
-    });
-    doc.save("products.pdf");
   }
 
   async function registerProduct() {
@@ -278,7 +278,6 @@ export default function AdminPanel({ onBack, user }) {
 
     await fetchProducts();
     await fetchSales();
-
     resetForm();
     setActiveTab("products");
   }
@@ -292,414 +291,543 @@ export default function AdminPanel({ onBack, user }) {
   return (
     <>
       <style>{`
-        *, *::before, *::after { box-sizing: border-box; }
-        :root {
-          --bg: #fafafa;
-          --card: #ffffff;
-          --text: #333;
-          --muted: #888;
-          --border: #e0e0e0;
-          --dark: #333;
-          --success: #2ecc71;
-          --danger: #db4437;
-          --accent: #555;
-        }
-
-        .admin-root {
-          min-height: 100vh;
-          background: var(--bg);
-          padding: 24px;
-        }
-
-        .container {
-          max-width: 1200px;
-          margin: 0 auto;
-          width: 100%;
-        }
-
-        .header-card, .content-card {
-          background: var(--card);
-          border: 1px solid var(--border);
-          border-radius: 8px;
-        }
-
-        .header-card {
-          padding: 16px;
-          margin-bottom: 16px;
-        }
-
-        .header-row {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          flex-wrap: wrap;
-        }
-
-        .title {
-          margin: 0;
-          font-size: 24px;
-          font-weight: 600;
-          color: var(--text);
-        }
-
-        .btn {
-          padding: 10px 16px;
-          border-radius: 6px;
-          border: 1px solid var(--border);
-          background: #fff;
-          color: var(--text);
-          cursor: pointer;
-          font-size: 14px;
-          transition: all .2s;
-        }
-
-        .btn:hover {
-          background: #f5f5f5;
-          border-color: #bbb;
-        }
-
-        .btn-dark {
-          background: var(--dark);
-          color: #fff;
-          border: none;
-        }
-        .btn-dark:hover { background: var(--accent); }
-
-        .btn-success {
-          background: var(--success);
-          color: #fff;
-          border: none;
-        }
-        .btn-success:hover { background: #27ae60; }
-
-        .btn-danger {
-          background: #fff;
-          color: var(--danger);
-          border: 1px solid #f0c3bf;
-        }
-        .btn-danger:hover {
-          background: #fdecea;
-          border-color: #f1a199;
-        }
-
-        .tabs {
-          display: flex;
-          gap: 8px;
-          margin-top: 12px;
-          border-bottom: 1px solid var(--border);
-          padding-bottom: 8px;
-        }
-
-        .tab {
-          padding: 10px 16px;
-          border: none;
-          background: transparent;
-          color: var(--muted);
-          cursor: pointer;
-          border-radius: 6px;
-          transition: all .2s;
-        }
-
-        .tab:hover { background: #f5f5f5; color: var(--text); }
-
-        .tab.active {
-          background: var(--dark);
-          color: #fff;
-        }
-
-        .content-card {
-          padding: 16px;
-        }
-
-        .section-title {
-          font-size: 18px;
-          font-weight: 600;
-          color: var(--text);
-          margin: 0 0 16px 0;
-        }
-
-        .toolbar {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 12px;
-        }
-
-        .table-wrap { overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; }
-        thead th {
-          padding: 12px 14px;
-          text-align: left;
-          font-size: 12px;
-          color: var(--muted);
-          text-transform: uppercase;
-          border-bottom: 1px solid var(--border);
-          background: #fafafa;
-        }
-        tbody td {
-          padding: 12px 14px;
-          font-size: 14px;
-          color: var(--text);
-          border-bottom: 1px solid var(--border);
-        }
-
-        .badge {
-          padding: 4px 8px;
-          border-radius: 6px;
-          font-size: 12px;
-          display: inline-block;
-        }
-
-        .input, .select {
-          width: 100%;
-          padding: 12px 14px;
-          border: 1px solid var(--border);
-          border-radius: 6px;
-          font-size: 14px;
-          background: #fff;
-          color: var(--text);
-          max-width: 100%;
-        }
-
-        .flow-card {
-          background: #fff;
-          border: 1px solid var(--border);
-          border-radius: 8px;
-          padding: 16px;
-          width: 100%;
-          max-width: 480px;
-          margin-left: auto;
-          margin-right: auto;
-        }
-
-        .flow-step {
-          text-align: center;
-          margin-bottom: 16px;
-          color: var(--muted);
-        }
-
-        .row { display: flex; gap: 12px; }
-        .col { flex: 1; }
-
-        footer.simple {
-          text-align: center;
-          padding: 12px;
-          font-size: 13px;
-          color: #666;
-          border-top: 1px solid #ddd;
-          background: #f9f9f9;
-          margin-top: 16px;
-          border-radius: 6px;
-        }
-
-        @media (max-width: 600px) {
-          .admin-root { padding: 12px; }
-          .header-card { padding: 12px; }
-          .content-card { padding: 12px; }
-          .title { font-size: 20px; }
-          .toolbar { flex-direction: column; }
-          .btn { width: 100%; }
-          .row { flex-direction: column; }
-          .flow-step div[style] { margin-bottom: 6px; }
-          thead th { font-size: 11px; padding: 10px; }
-          tbody td { font-size: 13px; padding: 10px; }
-          .flow-card { padding: 12px; max-width: 100%; }
-          .tabs { gap: 6px; }
-          .tab { padding: 8px 12px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', sans-serif; }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
 
-      <div className="admin-root">
-        <div className="container">
-          <div className="header-card">
-            <div className="header-row">
-              <h1 className="title">Админ-панель</h1>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  onClick={resetForm}
-                  className="btn"
-                >
-                  ← Очистить форму
-                </button>
-                <button
-                  onClick={() => navigate('/dashboard')}
-                  disabled={isLoading}
-                  className="btn btn-dark"
-                >
-                  🏠 На главную
-                </button>
-              </div>
-            </div>
+      <div style={{ 
+        minHeight: '100vh', 
+        background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)', 
+        padding: '24px' 
+      }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto', animation: 'fadeIn 0.6s ease' }}>
 
-            <div className="tabs">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+            <div>
+              <h1 style={{ fontSize: '36px', fontWeight: '700', color: '#1a1a1a', marginBottom: '8px', letterSpacing: '-1px' }}>
+                Админ-панель
+              </h1>
+              <p style={{ color: '#6b7280', fontSize: '14px', fontWeight: '500' }}>
+                Управление товарами и аналитика
+              </p>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               <button
-                className={`tab ${activeTab === "sales" ? "active" : ""}`}
-                onClick={() => setActiveTab("sales")}
+                onClick={resetForm}
+                style={{
+                  padding: '14px 28px',
+                  background: 'white',
+                  color: '#1a1a1a',
+                  border: '2px solid #e5e7eb',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.background = '#fafafa';
+                  e.target.style.borderColor = '#1a1a1a';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.background = 'white';
+                  e.target.style.borderColor = '#e5e7eb';
+                }}
               >
-                📊 Продажи
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Очистить форму
               </button>
+
               <button
-                className={`tab ${activeTab === "products" ? "active" : ""}`}
-                onClick={() => setActiveTab("products")}
+                onClick={() => navigate('/dashboard')}
+                style={{
+                  padding: '14px 28px',
+                  background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.2)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = 'none';
+                }}
               >
-                📦 Товары
-              </button>
-              <button
-                className={`tab ${activeTab === "добавить" ? "active" : ""}`}
-                onClick={() => setActiveTab("добавить")}
-              >
-                ➕ Добавить
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                На главную
               </button>
             </div>
           </div>
 
-          <div className="content-card">
-            <div className="toolbar">
-              {activeTab === "sales" && (
-                <>
-                  <button onClick={handleExportSales} className="btn btn-dark">💾 Excel (Продажи)</button>
-                </>
-              )}
-              {activeTab === "products" && (
-                <>
-                  <button onClick={handleExportProducts} className="btn btn-dark">💾 Excel (Товары)</button>
-                </>
-              )}
+          <div style={{ 
+            background: 'white', 
+            borderRadius: '20px', 
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)', 
+            overflow: 'hidden',
+            marginBottom: '24px'
+          }}>
+            <div style={{ 
+              padding: '20px 32px', 
+              background: '#fafafa', 
+              borderBottom: '2px solid #e5e7eb',
+              display: 'flex',
+              gap: '12px',
+              overflowX: 'auto'
+            }}>
+              {['sales', 'products', 'profit', 'добавить'].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  style={{
+                    padding: '12px 24px',
+                    background: activeTab === tab ? 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)' : 'transparent',
+                    color: activeTab === tab ? 'white' : '#6b7280',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseOver={(e) => {
+                    if (activeTab !== tab) {
+                      e.target.style.background = '#f5f5f5';
+                      e.target.style.color = '#1a1a1a';
+                    }
+                  }}
+                  onMouseOut={(e) => {
+                    if (activeTab !== tab) {
+                      e.target.style.background = 'transparent';
+                      e.target.style.color = '#6b7280';
+                    }
+                  }}
+                >
+                  {tab === 'sales' && '📊 Продажи'}
+                  {tab === 'products' && '📦 Товары'}
+                  {tab === 'profit' && '💰 Прибыль'}
+                  {tab === 'добавить' && '➕ Добавить'}
+                </button>
+              ))}
             </div>
 
-            {activeTab === "sales" && (
-              <div>
-                <h2 className="section-title">📊 История продаж</h2>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Продавец</th>
-                        <th>Товар</th>
-                        <th>Штрих-код</th>
-                        <th>Размер</th>
-                        <th>Кол-во</th>
-                        <th>Цена</th>
-                        <th>Дата</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.map((s) => (
-                        <tr key={s.id}>
-                          <td>{s.id}</td>
-                          <td>{s.seller_id}</td>
-                          <td style={{ fontWeight: 500 }}>{s.product}</td>
-                          <td style={{ fontFamily: 'monospace' }}>{s.barcode}</td>
-                          <td>
-                            <span className="badge" style={{ background: '#f5f5f5', color: '#555' }}>{s.size}</span>
-                          </td>
-                          <td>{s.quantity}</td>
-                          <td style={{ color: '#059669', fontWeight: 600 }}>{s.price} ₸</td>
-                          <td>{new Date(s.created_at).toLocaleString('ru-RU')}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "products" && (
-              <div>
-                <h2 className="section-title">📦 Список товаров</h2>
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Название</th>
-                        <th>Штрих-код</th>
-                        <th>Размер</th>
-                        <th>Остаток</th>
-                        <th>Цена</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {products.map((p) =>
-                        p.product_variants.map((v) => (
-                          <tr key={v.id}>
-                            <td>{p.id}</td>
-                            <td style={{ fontWeight: 500 }}>{p.name}</td>
-                            <td style={{ fontFamily: 'monospace' }}>{p.barcode}</td>
-                            <td>
-                              <span className="badge" style={{ background: '#f5f5f5', color: '#555' }}>{v.size}</span>
-                            </td>
-                            <td>
-                              <span
-                                className="badge"
-                                style={{
-                                  background: v.quantity > 10 ? '#eaf7f0' : v.quantity > 0 ? '#fff7e6' : '#fdecea',
-                                  color: v.quantity > 10 ? '#1e7e34' : v.quantity > 0 ? '#8a5a00' : '#b72b22'
-                                }}
-                              >
-                                {v.quantity} шт
-                              </span>
-                            </td>
-                            <td style={{ color: '#059669', fontWeight: 600 }}>{v.price} ₸</td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "добавить" && (
-              <div>
-                <h2 className="section-title">➕ Добавить товар</h2>
-
-                {step === "barcode" && (
-                  <div className="flow-card" style={{ maxWidth: 480, margin: '0 auto' }}>
-                    <div className="flow-step">
-                      <div style={{
-                        width: 48, height: 48, borderRadius: 8,
-                        background: '#f5f5f5', display: 'inline-flex',
-                        alignItems: 'center', justifyContent: 'center', marginBottom: 8
-                      }}>
-                        <span>🔍</span>
-                      </div>
-                      <div style={{ fontWeight: 600, color: '#333' }}>Сканируйте товар</div>
-                      <div style={{ color: '#888', fontSize: 13 }}>Введите или отсканируйте штрих-код</div>
-                    </div>
-
-                    <input
-                      type="text"
-                      placeholder="Штрих-код товара"
-                      value={form.barcode}
-                      onChange={(e) => setForm({ ...form, barcode: e.target.value })}
-                      className="input"
-                      style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: 16, marginBottom: 8 }}
-                    />
-                    <button onClick={checkBarcode} className="btn btn-dark" style={{ width: '100%' }}>
-                      Проверить наличие
+            <div style={{ padding: '32px' }}>
+              {activeTab === 'sales' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+                    <h2 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a' }}>
+                      История продаж
+                    </h2>
+                    <button
+                      onClick={handleExportSales}
+                      style={{
+                        padding: '12px 24px',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                      onMouseOver={(e) => {
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 10px 30px rgba(16, 185, 129, 0.3)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = 'none';
+                      }}
+                    >
+                      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Экспорт в Excel
                     </button>
                   </div>
-                )}
 
-                {step === "details" && (
-                  <div className="flow-card" style={{ maxWidth: 480, margin: '0 auto' }}>
-                    <div className="flow-step">
-                      <div style={{
-                        width: 48, height: 48, borderRadius: 8,
-                        background: '#f5f5f5', display: 'inline-flex',
-                        alignItems: 'center', justifyContent: 'center', marginBottom: 8
-                      }}>
-                        <span>📝</span>
-                      </div>
-                      <div style={{ fontWeight: 600, color: '#333' }}>Новый товар</div>
-                      <div style={{ color: '#888', fontSize: 13 }}>Товар не найден, добавьте информацию</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#fafafa', borderBottom: '2px solid #e5e7eb' }}>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>ID</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Продавец</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Товар</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Штрихкод</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Размер</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Кол-во</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Цена</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Дата</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sales.map((s, index) => (
+                          <tr 
+                            key={s.id}
+                            style={{ 
+                              borderBottom: index !== sales.length - 1 ? '1px solid #f3f4f6' : 'none',
+                              transition: 'background 0.2s'
+                            }}
+                            onMouseOver={(e) => e.currentTarget.style.background = '#fafafa'}
+                            onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                          >
+                            <td style={{ padding: '16px', color: '#6b7280', fontSize: '14px' }}>#{s.id}</td>
+                            <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px', fontWeight: '600' }}>{s.seller_id}</td>
+                            <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px', fontWeight: '600' }}>{s.product}</td>
+                            <td style={{ padding: '16px', color: '#6b7280', fontSize: '13px', fontFamily: 'monospace' }}>{s.barcode}</td>
+                            <td style={{ padding: '16px' }}>
+                              <span style={{ 
+                                padding: '4px 12px', 
+                                background: '#fafafa', 
+                                borderRadius: '6px', 
+                                fontSize: '13px',
+                                fontWeight: '600',
+                                color: '#374151'
+                              }}>
+                                {s.size}
+                              </span>
+                            </td>
+                            <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px', fontWeight: '600' }}>{s.quantity}</td>
+                            <td style={{ padding: '16px', color: '#10b981', fontSize: '15px', fontWeight: '700' }}>{s.price} ₸</td>
+                            <td style={{ padding: '16px', color: '#6b7280', fontSize: '13px' }}>
+                              {new Date(s.created_at).toLocaleString('ru-RU')}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'products' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+                    <h2 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a' }}>
+                      Список товаров
+                    </h2>
+                    <button
+                      onClick={handleExportProducts}
+                      style={{
+                        padding: '12px 24px',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '10px',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                      onMouseOver={(e) => {
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 10px 30px rgba(16, 185, 129, 0.3)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = 'none';
+                      }}
+                    >
+                      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                      Экспорт в Excel
+                    </button>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: '#fafafa', borderBottom: '2px solid #e5e7eb' }}>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>ID</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Название</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Штрихкод</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Размер</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Остаток</th>
+                          <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Цена</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {products.map((p) =>
+                          p.product_variants.map((v, vIndex) => (
+                            <tr 
+                              key={v.id}
+                              style={{ 
+                                borderBottom: '1px solid #f3f4f6',
+                                transition: 'background 0.2s'
+                              }}
+                              onMouseOver={(e) => e.currentTarget.style.background = '#fafafa'}
+                              onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                              <td style={{ padding: '16px', color: '#6b7280', fontSize: '14px' }}>#{p.id}</td>
+                              <td style={{ padding: '16px', color: '#1a1a1a', fontSize: '14px', fontWeight: '600' }}>{p.name}</td>
+                              <td style={{ padding: '16px', color: '#6b7280', fontSize: '13px', fontFamily: 'monospace' }}>{p.barcode}</td>
+                              <td style={{ padding: '16px' }}>
+                                <span style={{ 
+                                  padding: '4px 12px', 
+                                  background: '#fafafa', 
+                                  borderRadius: '6px', 
+                                  fontSize: '13px',
+                                  fontWeight: '600',
+                                  color: '#374151'
+                                }}>
+                                  {v.size}
+                                </span>
+                              </td>
+                              <td style={{ padding: '16px' }}>
+                                <span style={{ 
+                                  padding: '4px 12px', 
+                                  background: v.quantity > 10 ? '#f0fdf4' : v.quantity > 0 ? '#fef3c7' : '#fef2f2',
+                                  color: v.quantity > 10 ? '#16a34a' : v.quantity > 0 ? '#92400e' : '#dc2626',
+                                  borderRadius: '6px', 
+                                  fontSize: '13px',
+                                  fontWeight: '600'
+                                }}>
+                                  {v.quantity} шт
+                                </span>
+                              </td>
+                              <td style={{ padding: '16px', color: '#10b981', fontSize: '15px', fontWeight: '700' }}>{v.price} ₸</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'profit' && (
+                <div>
+                  <h2 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a', marginBottom: '24px' }}>
+                    Анализ прибыли
+                  </h2>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                        Период
+                      </label>
+                      <select
+                        value={profitPeriod}
+                        onChange={(e) => setProfitPeriod(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '14px 16px',
+                          border: '2px solid #e5e7eb',
+                          borderRadius: '12px',
+                          fontSize: '15px',
+                          background: 'white',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                        onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      >
+                        <option value="today">Сегодня</option>
+                        <option value="yesterday">Вчера</option>
+                        <option value="week">Неделя</option>
+                        <option value="month">Месяц</option>
+                        <option value="year">Год</option>
+                        <option value="all">Все время</option>
+                      </select>
                     </div>
 
-                    <div className="col" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6 }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
+                        Тип оплаты
+                      </label>
+                      <select
+                        value={profitPaymentType}
+                        onChange={(e) => setProfitPaymentType(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '14px 16px',
+                          border: '2px solid #e5e7eb',
+                          borderRadius: '12px',
+                          fontSize: '15px',
+                          background: 'white',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                        onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      >
+                        <option value="all">Все оплаты</option>
+                        <option value="kaspi">Kaspi QR</option>
+                        <option value="halyk">Halyk QR | Карта</option>
+                        <option value="cash">Наличные</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    padding: '48px 32px',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    borderRadius: '20px',
+                    textAlign: 'center',
+                    boxShadow: '0 20px 60px rgba(16, 185, 129, 0.3)'
+                  }}>
+                    <p style={{ color: 'rgba(255, 255, 255, 0.9)', fontSize: '16px', fontWeight: '600', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                      Общая прибыль
+                    </p>
+                    <p style={{ color: 'white', fontSize: '56px', fontWeight: '700', letterSpacing: '-2px' }}>
+                      {profit.toLocaleString('ru-RU')} ₸
+                    </p>
+                    <p style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', marginTop: '12px' }}>
+                      За выбранный период
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'добавить' && (
+                <div>
+                  <h2 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a', marginBottom: '24px' }}>
+                    Добавить товар на склад
+                  </h2>
+
+                  {step === 'barcode' && (
+                    <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+                      <div style={{
+                        padding: '32px',
+                        background: '#fafafa',
+                        borderRadius: '16px',
+                        textAlign: 'center',
+                        marginBottom: '24px'
+                      }}>
+                        <div style={{
+                          width: '80px',
+                          height: '80px',
+                          background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                          borderRadius: '50%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginBottom: '20px'
+                        }}>
+                          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="white">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                        </div>
+                        <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#1a1a1a', marginBottom: '8px' }}>
+                          Шаг 1: Сканирование товара
+                        </h3>
+                        <p style={{ color: '#6b7280', fontSize: '14px' }}>
+                          Введите или отсканируйте штрихкод товара
+                        </p>
+                      </div>
+
+                      <input
+                        type="text"
+                        placeholder="Штрихкод товара"
+                        value={form.barcode}
+                        onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '16px 20px',
+                          border: '2px solid #e5e7eb',
+                          borderRadius: '12px',
+                          fontSize: '16px',
+                          textAlign: 'center',
+                          fontFamily: 'monospace',
+                          marginBottom: '16px',
+                          transition: 'all 0.2s'
+                        }}
+                        onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                        onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                      />
+
+                      <button
+                        onClick={checkBarcode}
+                        style={{
+                          width: '100%',
+                          padding: '16px',
+                          background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '12px',
+                          fontSize: '15px',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s'
+                        }}
+                        onMouseOver={(e) => {
+                          e.target.style.transform = 'translateY(-2px)';
+                          e.target.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.2)';
+                        }}
+                        onMouseOut={(e) => {
+                          e.target.style.transform = 'translateY(0)';
+                          e.target.style.boxShadow = 'none';
+                        }}
+                      >
+                        Проверить наличие
+                      </button>
+                    </div>
+                  )}
+
+                  {step === 'details' && (
+                    <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+                      <div style={{
+                        padding: '32px',
+                        background: '#fef3c7',
+                        border: '2px solid #fcd34d',
+                        borderRadius: '16px',
+                        textAlign: 'center',
+                        marginBottom: '24px'
+                      }}>
+                        <div style={{
+                          width: '80px',
+                          height: '80px',
+                          background: '#fbbf24',
+                          borderRadius: '50%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginBottom: '20px'
+                        }}>
+                          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="white">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                        </div>
+                        <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#92400e', marginBottom: '8px' }}>
+                          Товар не найден
+                        </h3>
+                        <p style={{ color: '#78350f', fontSize: '14px' }}>
+                          Этот товар отсутствует в базе данных. Добавьте информацию о нем
+                        </p>
+                      </div>
+
+                      <div style={{ marginBottom: '16px' }}>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                           Название товара
                         </label>
                         <input
@@ -707,11 +835,21 @@ export default function AdminPanel({ onBack, user }) {
                           placeholder="Например: Футболка Nike"
                           value={form.name}
                           onChange={(e) => setForm({ ...form, name: e.target.value })}
-                          className="input"
+                          style={{
+                            width: '100%',
+                            padding: '14px 16px',
+                            border: '2px solid #e5e7eb',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            transition: 'all 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                          onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
                         />
                       </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6 }}>
+
+                      <div style={{ marginBottom: '24px' }}>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                           Цена (₸)
                         </label>
                         <input
@@ -719,117 +857,234 @@ export default function AdminPanel({ onBack, user }) {
                           placeholder="0"
                           value={form.price}
                           onChange={(e) => setForm({ ...form, price: e.target.value })}
-                          className="input"
+                          style={{
+                            width: '100%',
+                            padding: '14px 16px',
+                            border: '2px solid #e5e7eb',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            transition: 'all 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                          onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
                         />
                       </div>
-                      <div className="row" style={{ gap: 8 }}>
-                        <button onClick={registerProduct} className="btn btn-success" style={{ flex: 1 }}>
-                          Сохранить
+
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button
+                          onClick={registerProduct}
+                          style={{
+                            flex: 1,
+                            padding: '16px',
+                            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s'
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.transform = 'translateY(-2px)';
+                            e.target.style.boxShadow = '0 10px 30px rgba(16, 185, 129, 0.3)';
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.transform = 'translateY(0)';
+                            e.target.style.boxShadow = 'none';
+                          }}
+                        >
+                          Сохранить товар
                         </button>
-                        <button onClick={resetForm} className="btn">Отмена</button>
+                        <button
+                          onClick={resetForm}
+                          style={{
+                            padding: '16px 32px',
+                            background: 'white',
+                            color: '#1a1a1a',
+                            border: '2px solid #e5e7eb',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.background = '#fafafa';
+                            e.target.style.borderColor = '#1a1a1a';
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.background = 'white';
+                            e.target.style.borderColor = '#e5e7eb';
+                          }}
+                        >
+                          Отмена
+                        </button>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {step === "stock" && (
-                  <div className="flow-card" style={{ maxWidth: 480, margin: '0 auto' }}>
-                    <div className="flow-step">
+                  {step === 'stock' && (
+                    <div style={{ maxWidth: '600px', margin: '0 auto' }}>
                       <div style={{
-                        width: 48, height: 48, borderRadius: 8,
-                        background: '#f5f5f5', display: 'inline-flex',
-                        alignItems: 'center', justifyContent: 'center', marginBottom: 8
+                        padding: '32px',
+                        background: '#f0fdf4',
+                        border: '2px solid #bbf7d0',
+                        borderRadius: '16px',
+                        textAlign: 'center',
+                        marginBottom: '24px'
                       }}>
-                        <span>📦</span>
+                        <div style={{
+                          width: '80px',
+                          height: '80px',
+                          background: '#10b981',
+                          borderRadius: '50%',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginBottom: '20px'
+                        }}>
+                          <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="white">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <h3 style={{ fontSize: '20px', fontWeight: '600', color: '#065f46', marginBottom: '8px' }}>
+                          {foundProduct?.name}
+                        </h3>
+                        <p style={{ color: '#047857', fontSize: '14px', fontFamily: 'monospace' }}>
+                          {form.barcode}
+                        </p>
                       </div>
-                      <div style={{ fontWeight: 600, color: '#333' }}>{foundProduct?.name}</div>
-                      <div style={{ color: '#888', fontSize: 13, fontFamily: 'monospace' }}>{form.barcode}</div>
-                    </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 6 }}>
+                      <div style={{ marginBottom: '24px' }}>
+                        <label style={{ display: 'block', marginBottom: '10px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                           Цена (₸)
                         </label>
                         <input
                           type="number"
                           value={form.price}
                           onChange={(e) => setForm({ ...form, price: e.target.value })}
-                          className="input"
+                          style={{
+                            width: '100%',
+                            padding: '14px 16px',
+                            border: '2px solid #e5e7eb',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            transition: 'all 0.2s'
+                          }}
+                          onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                          onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
                         />
                       </div>
 
-                      <div>
-                        <label style={{ display: 'block', fontSize: 13, color: '#666', marginBottom: 8 }}>
+                      <div style={{ marginBottom: '24px' }}>
+                        <label style={{ display: 'block', marginBottom: '16px', fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                           Количество по размерам
                         </label>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>S</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={form.sizes.S}
-                            onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, S: e.target.value } })}
-                            className="input"
-                          />
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>M</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={form.sizes.M}
-                            onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, M: e.target.value } })}
-                            className="input"
-                          />
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-                          <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>L</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={form.sizes.L}
-                            onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, L: e.target.value } })}
-                            className="input"
-                          />
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-  <span className="badge" style={{ background: '#f5f5f5', color: '#555', width: 32, textAlign: 'center' }}>XL</span>
-  <input
-    type="number"
-    min="0"
-    step="1"
-    value={form.sizes.XL}
-    onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, XL: e.target.value } })}
-    className="input"
-  />
-</div>
+                        {['S', 'M', 'L', 'XL'].map((size) => (
+                          <div key={size} style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                            <span style={{
+                              width: '48px',
+                              height: '48px',
+                              background: '#fafafa',
+                              border: '2px solid #e5e7eb',
+                              borderRadius: '10px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '16px',
+                              fontWeight: '600',
+                              color: '#1a1a1a'
+                            }}>
+                              {size}
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={form.sizes[size]}
+                              onChange={(e) => setForm({ ...form, sizes: { ...form.sizes, [size]: e.target.value } })}
+                              placeholder="0"
+                              style={{
+                                flex: 1,
+                                padding: '14px 16px',
+                                border: '2px solid #e5e7eb',
+                                borderRadius: '12px',
+                                fontSize: '15px',
+                                transition: 'all 0.2s'
+                              }}
+                              onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
+                              onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                            />
+                          </div>
+                        ))}
                       </div>
 
-                      <div className="row" style={{ paddingTop: 8 }}>
-                        <button onClick={addStock} className="btn btn-dark" style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button
+                          onClick={addStock}
+                          style={{
+                            flex: 1,
+                            padding: '16px',
+                            background: 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.3s',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px'
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.transform = 'translateY(-2px)';
+                            e.target.style.boxShadow = '0 10px 30px rgba(0, 0, 0, 0.2)';
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.transform = 'translateY(0)';
+                            e.target.style.boxShadow = 'none';
+                          }}
+                        >
+                          <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
                           Добавить на склад
                         </button>
-                        <button onClick={resetForm} className="btn">Отмена</button>
+                        <button
+                          onClick={resetForm}
+                          style={{
+                            padding: '16px 32px',
+                            background: 'white',
+                            color: '#1a1a1a',
+                            border: '2px solid #e5e7eb',
+                            borderRadius: '12px',
+                            fontSize: '15px',
+                            fontWeight: '600',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseOver={(e) => {
+                            e.target.style.background = '#fafafa';
+                            e.target.style.borderColor = '#1a1a1a';
+                          }}
+                          onMouseOut={(e) => {
+                            e.target.style.background = 'white';
+                            e.target.style.borderColor = '#e5e7eb';
+                          }}
+                        >
+                          Отмена
+                        </button>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-
-          <footer className="simple">
-            © qaraa.kz | Система безопасного доступа, 2025. <br />
-            Последнее обновление: 02.10.2025 | srk.
-          </footer>
         </div>
       </div>
     </>
