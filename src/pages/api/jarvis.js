@@ -1,5 +1,6 @@
 // api/jarvis.js
 import { GoogleGenAI } from '@google/genai';
+// import fetch from 'node-fetch'; // если Node < 18
 
 const GEMINI_API_KEY = 'AIzaSyBkpYrWRtYfSuCop83y14-q2sJrQ7NRfkQ';
 const ELEVEN_API_KEY = 'sk_07e740f5262e7f93b763e03a949e7311e8f056eac9719cf9';
