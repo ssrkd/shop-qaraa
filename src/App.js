@@ -6,6 +6,7 @@ import Login from './pages/Login'
 import NewSale from './pages/NewSale'
 import AdminPanel from './pages/AdminPanel'
 import SalesHistory from './pages/SalesHistory'
+import Jarvis from './pages/jarvis'
 import '@fortawesome/fontawesome-free/css/all.min.css'
 
 function App() {
@@ -69,6 +70,12 @@ function App() {
         <Route
           path="/sales-history"
           element={user ? <SalesHistory user={user} /> : <Navigate to="/login" />}
+        />
+
+        {/* Jarvis */}
+        <Route
+          path="/jarvis"
+          element={user ? <Jarvis user={user} /> : <Navigate to="/login" />}
         />
 
         {/* Любой другой путь → редирект на "/" */}

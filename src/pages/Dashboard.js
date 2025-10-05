@@ -1246,6 +1246,39 @@ export default function Dashboard({ user, onLogout }) {
                     </svg>
                     Админ-панель
                   </button>
+                  <button
+                    onClick={() => navigate('/jarvis')}
+                    style={{
+                      flex: 1,
+                      minWidth: '140px',
+                      padding: '14px 20px',
+                      background: 'transparent',
+                      color: '#6b7280',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px'
+                    }}
+                    onMouseOver={(e) => e.target.style.background = '#f9fafb'}
+                    onMouseOut={(e) => e.target.style.background = 'transparent'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+  <circle cx="12" cy="12" r="10" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  <circle cx="12" cy="12" r="6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+  <circle cx="12" cy="12" r="2" fill="currentColor"/>
+  <line x1="12" y1="2" x2="12" y2="6" strokeWidth="1.5" strokeLinecap="round"/>
+  <line x1="12" y1="18" x2="12" y2="22" strokeWidth="1.5" strokeLinecap="round"/>
+  <line x1="2" y1="12" x2="6" y2="12" strokeWidth="1.5" strokeLinecap="round"/>
+  <line x1="18" y1="12" x2="22" y2="12" strokeWidth="1.5" strokeLinecap="round"/>
+</svg>
+                    Jarvis
+                  </button>
                 </div>
 
                 <div style={{ 
