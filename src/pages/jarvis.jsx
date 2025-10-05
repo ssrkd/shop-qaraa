@@ -53,11 +53,11 @@ function Jarvis() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('http://localhost:3001/api/jarvis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: userMsg.text })
-      });
+        const res = await fetch('/api/jarvis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: userMsg.text })
+          });
 
       const data = await res.json();
 

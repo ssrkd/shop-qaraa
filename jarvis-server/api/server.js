@@ -1,22 +1,22 @@
-import express from 'express';
-import bodyParser from 'body-parser';
-import cors from 'cors';
+// jarvis-server/api/jarvis.js
 import { GoogleGenAI } from '@google/genai';
-import fetch from 'node-fetch'; // Node 18+ fetch встроен, но для совместимости оставим импорт
-
-const app = express();
-const PORT = process.env.PORT || 3001;
-
-app.use(cors());
-app.use(bodyParser.json());
-
+import fetch from 'node-fetch'; // для совместимости с Node 18+
+ 
 const GEMINI_API_KEY = 'AIzaSyBkpYrWRtYfSuCop83y14-q2sJrQ7NRfkQ';
 const ELEVEN_API_KEY = 'sk_07e740f5262e7f93b763e03a949e7311e8f056eac9719cf9';
 const VOICE_ID = 'txnCCHHGKmYIwrn7HfHQ';
 
-app.post('/api/jarvis', async (req, res) => {
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Метод не разрешён' });
+    return;
+  }
+
   const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Пустой запрос' });
+  if (!prompt) {
+    res.status(400).json({ error: 'Пустой запрос' });
+    return;
+  }
 
   try {
     // 1️⃣ Генерация текста через Gemini
@@ -33,7 +33,6 @@ app.post('/api/jarvis', async (req, res) => {
     });
 
     let textResponse = result?.text || 'Пустой ответ от Gemini.';
-    // Ограничиваем длину для озвучки (например, до 200 символов)
     if (textResponse.length > 200) textResponse = textResponse.slice(0, 200);
 
     // 2️⃣ Генерация аудио через ElevenLabs
@@ -49,15 +48,11 @@ app.post('/api/jarvis', async (req, res) => {
     const audioBuffer = await audioRes.arrayBuffer();
     const audioBase64 = Buffer.from(audioBuffer).toString('base64');
 
-    // 3️⃣ Отправляем текст и аудио на фронтенд
-    res.json({ text: textResponse, audio: audioBase64 });
+    // 3️⃣ Отправка на фронтенд
+    res.status(200).json({ text: textResponse, audio: audioBase64 });
 
   } catch (error) {
-    console.error('Jarvis server error:', error);
+    console.error('Jarvis API error:', error);
     res.status(500).json({ error: 'Произошла ошибка при генерации текста или озвучке.' });
   }
-});
-
-app.listen(PORT, () => {
-  console.log(`Jarvis server running on http://localhost:${PORT}`);
-});
+}
