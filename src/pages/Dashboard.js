@@ -1052,6 +1052,71 @@ export default function Dashboard({ user, onLogout }) {
             Посмотреть историю
           </button>
         </div>
+
+        <div style={{
+          background: 'white',
+          borderRadius: '20px',
+          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.08)',
+          padding: '32px',
+          textAlign: 'center',
+          transition: 'all 0.3s',
+          border: '2px solid #e5e7eb'
+        }}
+        onMouseOver={(e) => {
+          e.currentTarget.style.transform = 'translateY(-4px)';
+          e.currentTarget.style.boxShadow = '0 30px 80px rgba(0, 0, 0, 0.12)';
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = '0 20px 60px rgba(0, 0, 0, 0.08)';
+        }}
+        >
+          <div style={{
+            width: '80px',
+            height: '80px',
+            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+            borderRadius: '20px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '20px'
+          }}>
+            <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="white">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h3 style={{ fontSize: '22px', fontWeight: '600', color: '#1a1a1a', marginBottom: '12px' }}>
+            Аналитика продаж
+          </h3>
+          <p style={{ color: '#6b7280', fontSize: '15px', marginBottom: '24px' }}>
+            Отчетность (пока не придумал)
+          </p>
+          <button
+            onClick={() => navigate('/analitika-history')}
+            style={{
+              width: '100%',
+              padding: '16px',
+              background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              fontSize: '15px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.3s'
+            }}
+            onMouseOver={(e) => {
+              e.target.style.transform = 'translateY(-2px)';
+              e.target.style.boxShadow = '0 10px 30px rgba(59, 130, 246, 0.3)';
+            }}
+            onMouseOut={(e) => {
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            Посмотреть
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1269,13 +1334,14 @@ export default function Dashboard({ user, onLogout }) {
                     onMouseOut={(e) => e.target.style.background = 'transparent'}
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-  <circle cx="12" cy="12" r="10" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  <circle cx="12" cy="12" r="6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-  <circle cx="12" cy="12" r="2" fill="currentColor"/>
-  <line x1="12" y1="2" x2="12" y2="6" strokeWidth="1.5" strokeLinecap="round"/>
-  <line x1="12" y1="18" x2="12" y2="22" strokeWidth="1.5" strokeLinecap="round"/>
-  <line x1="2" y1="12" x2="6" y2="12" strokeWidth="1.5" strokeLinecap="round"/>
-  <line x1="18" y1="12" x2="22" y2="12" strokeWidth="1.5" strokeLinecap="round"/>
+  <circle cx="12" cy="12" r="10" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  
+  <circle cx="12" cy="12" r="3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+
+  <line x1="12" y1="1" x2="12" y2="5" strokeWidth="2" strokeLinecap="round"/>
+  <line x1="12" y1="19" x2="12" y2="23" strokeWidth="2" strokeLinecap="round"/>
+  <line x1="1" y1="12" x2="5" y2="12" strokeWidth="2" strokeLinecap="round"/>
+  <line x1="19" y1="12" x2="23" y2="12" strokeWidth="2" strokeLinecap="round"/>
 </svg>
                     Jarvis
                   </button>
@@ -1311,7 +1377,7 @@ export default function Dashboard({ user, onLogout }) {
               marginTop: '32px'
             }}>
               © qaraa.crm | powered by Jarvis. Система безопасного доступа, 2025.<br />
-              Последнее обновление: 05.10.2025 | srk.
+              Последнее обновление: 11.10.2025 | srk.
             </footer>
           </div>
         </div>

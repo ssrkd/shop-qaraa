@@ -138,7 +138,9 @@ export default function AdminPanel({ onBack, user }) {
       .gte("created_at", startDateUTC.toISOString())
       .lte("created_at", endDateUTC.toISOString());
   
-    if (paymentType !== "all") {
+    if (paymentType === "mixed") {
+      query = query.like("payment_method", "Смешанная%");
+    } else if (paymentType !== "all") {
       query = query.eq("payment_method", methodMapping[paymentType]);
     }
   
@@ -685,6 +687,7 @@ export default function AdminPanel({ onBack, user }) {
                         <option value="kaspi">Kaspi QR</option>
                         <option value="halyk">Halyk QR | Карта</option>
                         <option value="cash">Наличные</option>
+                        <option value="mixed">Смешанная оплата</option>
                       </select>
                     </div>
                   </div>

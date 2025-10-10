@@ -21,8 +21,6 @@ export default function NewSale({ user, onBack }) {
   const [givenAmount, setGivenAmount] = useState('');
   const [method, setMethod] = useState('');
   const [cart, setCart] = useState([]);
-  const [mixedCashAmount, setMixedCashAmount] = useState('');
-  const [mixedSecondMethod, setMixedSecondMethod] = useState('');
 
   const localDate = new Date();
   const offsetMs = localDate.getTimezoneOffset() * 60 * 1000;
@@ -223,17 +221,6 @@ export default function NewSale({ user, onBack }) {
       return;
     }
 
-    if (paymentMethod === 'mixed') {
-      if (!mixedCashAmount || Number(mixedCashAmount) <= 0 || Number(mixedCashAmount) >= totalAmount) {
-        setError('Введите корректную сумму наличных (меньше общей суммы)');
-        return;
-      }
-      if (!mixedSecondMethod) {
-        setError('Выберите способ оплаты для остатка');
-        return;
-      }
-    }
-
     try {
       setIsLoading(true);
 
@@ -263,18 +250,10 @@ export default function NewSale({ user, onBack }) {
         halyk: 'Halyk QR | Карта',
       };
 
-      let finalPaymentMethod = '';
-      if (paymentMethod === 'mixed') {
-        const secondMethodName = methodMapping[mixedSecondMethod] || mixedSecondMethod;
-        finalPaymentMethod = `Смешанная (Наличные: ${Number(mixedCashAmount).toFixed(2)} ₸ + ${secondMethodName}: ${(totalAmount - Number(mixedCashAmount)).toFixed(2)} ₸)`;
-      } else {
-        finalPaymentMethod = methodMapping[paymentMethod] || paymentMethod;
-      }
-
       // ✅ Обновляем метод оплаты во всех sales, которые входят в эту продажу
 const { error: updateError } = await supabase
 .from('sales')
-.update({ payment_method: finalPaymentMethod })
+.update({ payment_method: methodMapping[paymentMethod] || paymentMethod })
 .in('id', saleIds);
 
 if (updateError) throw updateError;
@@ -302,16 +281,12 @@ if (updateError) throw updateError;
       setSuccess(
         paymentMethod === 'cash'
           ? `Продажа успешно проведена! Сдача: ${change.toFixed(2)} ₸`
-          : paymentMethod === 'mixed'
-          ? `Продажа успешно проведена! Наличные: ${Number(mixedCashAmount).toFixed(2)} ₸, ${methodMapping[mixedSecondMethod]}: ${(totalAmount - Number(mixedCashAmount)).toFixed(2)} ₸`
           : 'Продажа успешно проведена!'
       );
       setCart([]);
       setShowPayment(false);
       setMethod('');
       setGivenAmount('');
-      setMixedCashAmount('');
-      setMixedSecondMethod('');
       setError('');
     } catch (err) {
       console.error('Ошибка при оплате:', err.message);
@@ -929,8 +904,6 @@ if (updateError) throw updateError;
                     setShowPayment(false);
                     setMethod('');
                     setGivenAmount('');
-                    setMixedCashAmount('');
-                    setMixedSecondMethod('');
                   }}
                   style={{
                     width: '40px',
@@ -1088,56 +1061,6 @@ if (updateError) throw updateError;
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                     </svg>
                   </button>
-
-                  <button
-                    onClick={() => setMethod('mixed')}
-                    style={{
-                      padding: '24px',
-                      background: 'white',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '16px',
-                      cursor: 'pointer',
-                      transition: 'all 0.3s',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '16px'
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.borderColor = '#f59e0b';
-                      e.currentTarget.style.background = '#fffbeb';
-                      e.currentTarget.style.transform = 'translateY(-2px)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                      e.currentTarget.style.background = 'white';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                    }}
-                  >
-                    <div style={{
-                      width: 48,
-                      height: 48,
-                      borderRadius: '8px',
-                      background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      <svg width="28" height="28" fill="none" viewBox="0 0 24 24" stroke="white">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
-                    </div>
-                    <div style={{ flex: 1, textAlign: 'left' }}>
-                      <div style={{ fontSize: '18px', fontWeight: '600', color: '#1a1a1a', marginBottom: '4px' }}>
-                        Смешанная оплата
-                      </div>
-                      <div style={{ fontSize: '14px', color: '#6b7280' }}>
-                        Наличные + Kaspi/Halyk
-                      </div>
-                    </div>
-                    <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#9ca3af">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
                 </div>
               ) : method === 'cash' ? (
                 <div>
@@ -1247,186 +1170,6 @@ if (updateError) throw updateError;
                       if (!isLoading && givenAmount && Number(givenAmount) >= totalAmount) {
                         e.target.style.transform = 'translateY(-2px)';
                         e.target.style.boxShadow = '0 10px 30px rgba(16, 185, 129, 0.3)';
-                      }
-                    }}
-                    onMouseOut={(e) => {
-                      e.target.style.transform = 'translateY(0)';
-                      e.target.style.boxShadow = 'none';
-                    }}
-                  >
-                    {isLoading ? 'Обработка...' : 'Завершить оплату'}
-                  </button>
-                </div>
-              ) : method === 'mixed' ? (
-                <div>
-                  <button
-                    onClick={() => setMethod('')}
-                    style={{
-                      padding: '10px 16px',
-                      background: 'white',
-                      border: '2px solid #e5e7eb',
-                      borderRadius: '10px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: '#6b7280',
-                      cursor: 'pointer',
-                      marginBottom: '24px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}
-                  >
-                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>
-                    Назад
-                  </button>
-
-                  <div style={{ marginBottom: '24px' }}>
-                    <label style={{ display: 'block', marginBottom: '10px', fontSize: '14px', color: '#6b7280', fontWeight: '600' }}>
-                      Сумма наличных
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      max={totalAmount - 1}
-                      value={mixedCashAmount}
-                      onChange={(e) => setMixedCashAmount(e.target.value)}
-                      placeholder="Введите сумму наличных"
-                      style={{
-                        width: '100%',
-                        padding: '16px',
-                        border: '2px solid #e5e7eb',
-                        borderRadius: '12px',
-                        fontSize: '18px',
-                        fontWeight: '600'
-                      }}
-                      onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
-                      onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
-                    />
-                  </div>
-
-                  {mixedCashAmount && Number(mixedCashAmount) > 0 && Number(mixedCashAmount) < totalAmount && (
-                    <div style={{
-                      padding: '20px',
-                      background: '#fffbeb',
-                      border: '2px solid #fcd34d',
-                      borderRadius: '12px',
-                      marginBottom: '24px'
-                    }}>
-                      <div style={{ fontSize: '14px', color: '#92400e', marginBottom: '12px', fontWeight: '600' }}>
-                        Оставшаяся сумма к оплате:
-                      </div>
-                      <div style={{ fontSize: '28px', fontWeight: '700', color: '#f59e0b', letterSpacing: '-0.5px' }}>
-                        {(totalAmount - Number(mixedCashAmount)).toFixed(2)} ₸
-                      </div>
-                    </div>
-                  )}
-
-                  {mixedCashAmount && Number(mixedCashAmount) > 0 && Number(mixedCashAmount) < totalAmount && (
-                    <div style={{ marginBottom: '24px' }}>
-                      <label style={{ display: 'block', marginBottom: '12px', fontSize: '14px', color: '#6b7280', fontWeight: '600' }}>
-                        Выберите способ оплаты для остатка
-                      </label>
-                      <div style={{ display: 'grid', gap: '12px' }}>
-                        <button
-                          onClick={() => setMixedSecondMethod('kaspi')}
-                          style={{
-                            padding: '16px',
-                            background: mixedSecondMethod === 'kaspi' ? '#fef2f2' : 'white',
-                            border: mixedSecondMethod === 'kaspi' ? '2px solid #f14635' : '2px solid #e5e7eb',
-                            borderRadius: '12px',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px'
-                          }}
-                        >
-                          <img src={kaspiLogo} alt="Kaspi" style={{ width: 40, height: 40 }} />
-                          <div style={{ flex: 1, textAlign: 'left' }}>
-                            <div style={{ fontSize: '16px', fontWeight: '600', color: '#1a1a1a' }}>
-                              Kaspi QR
-                            </div>
-                          </div>
-                          {mixedSecondMethod === 'kaspi' && (
-                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#f14635">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-
-                        <button
-                          onClick={() => setMixedSecondMethod('halyk')}
-                          style={{
-                            padding: '16px',
-                            background: mixedSecondMethod === 'halyk' ? '#f0fdf4' : 'white',
-                            border: mixedSecondMethod === 'halyk' ? '2px solid #00a651' : '2px solid #e5e7eb',
-                            borderRadius: '12px',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px'
-                          }}
-                        >
-                          <img src={halykLogo} alt="Halyk" style={{ width: 40, height: 40 }} />
-                          <div style={{ flex: 1, textAlign: 'left' }}>
-                            <div style={{ fontSize: '16px', fontWeight: '600', color: '#1a1a1a' }}>
-                              Halyk QR | Карта
-                            </div>
-                          </div>
-                          {mixedSecondMethod === 'halyk' && (
-                            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#00a651">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {mixedCashAmount && Number(mixedCashAmount) >= totalAmount && (
-                    <div style={{
-                      padding: '16px',
-                      background: '#fef2f2',
-                      border: '2px solid #fecaca',
-                      borderRadius: '12px',
-                      marginBottom: '24px',
-                      color: '#dc2626',
-                      fontSize: '14px',
-                      fontWeight: '600'
-                    }}>
-                      Сумма наличных должна быть меньше общей суммы
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => handlePayment('mixed')}
-                    disabled={isLoading || !mixedCashAmount || Number(mixedCashAmount) <= 0 || Number(mixedCashAmount) >= totalAmount || !mixedSecondMethod}
-                    style={{
-                      width: '100%',
-                      padding: '18px',
-                      background: isLoading || !mixedCashAmount || Number(mixedCashAmount) <= 0 || Number(mixedCashAmount) >= totalAmount || !mixedSecondMethod
-                        ? '#e5e7eb'
-                        : 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '12px',
-                      fontSize: '16px',
-                      fontWeight: '600',
-                      cursor: isLoading || !mixedCashAmount || Number(mixedCashAmount) <= 0 || Number(mixedCashAmount) >= totalAmount || !mixedSecondMethod ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.3s',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '10px'
-                    }}
-                    onMouseOver={(e) => {
-                      if (!isLoading && mixedCashAmount && Number(mixedCashAmount) > 0 && Number(mixedCashAmount) < totalAmount && mixedSecondMethod) {
-                        e.target.style.transform = 'translateY(-2px)';
-                        e.target.style.boxShadow = '0 10px 30px rgba(245, 158, 11, 0.3)';
                       }
                     }}
                     onMouseOut={(e) => {
