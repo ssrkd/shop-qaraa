@@ -1,0 +1,17 @@
+{
+  "name": "akaai-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot для интеграции с Qaraa CRM",
+  "main": "api/webhook.js",
+  "scripts": {
+    "start": "node api/webhook.js",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  },
+  "engines": {
+    "node": ">=14.x"
+  }
+}
+

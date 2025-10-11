@@ -13,10 +13,15 @@ export default function AkaAI({ user }) {
   const [showSidebar, setShowSidebar] = useState(true);
   const [time, setTime] = useState(new Date());
   const [userRole, setUserRole] = useState(null);
+  const [pendingTelegramMessage, setPendingTelegramMessage] = useState(null);
+  const [showQuickButtons, setShowQuickButtons] = useState(false);
+  const [chatMode, setChatMode] = useState('ai'); // 'ai' или 'messages'
+  const [unreadMessages, setUnreadMessages] = useState(0);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
   const GEMINI_API_KEY = 'AIzaSyBkpYrWRtYfSuCop83y14-q2sJrQ7NRfkQ';
+  const TELEGRAM_BOT_TOKEN = '8363449094:AAHpdTNzz4mdtG49_2ldhx_uT3WTzeoz7xA';
 
   // Проверяем роль пользователя
   useEffect(() => {
@@ -169,6 +174,49 @@ export default function AkaAI({ user }) {
     }
   };
 
+  const sendTelegramMessage = async (username, messageText) => {
+    try {
+      // Получаем chat_id пользователя из базы
+      const { data: userData, error } = await supabase
+        .from('login')
+        .select('telegram_chat_id, fullname')
+        .eq('username', username)
+        .single();
+
+      if (error || !userData) {
+        return { success: false, error: `Пользователь @${username} не найден в системе` };
+      }
+
+      if (!userData.telegram_chat_id) {
+        return { success: false, error: `У пользователя ${userData.fullname} (@${username}) не указан Telegram chat_id. Попросите его написать боту /start` };
+      }
+
+      // Отправляем сообщение через Telegram Bot API
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          chat_id: userData.telegram_chat_id,
+          text: messageText,
+          parse_mode: 'HTML'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.ok) {
+        return { success: true, name: userData.fullname };
+      } else {
+        return { success: false, error: `Ошибка отправки: ${data.description}` };
+      }
+    } catch (error) {
+      console.error('Telegram send error:', error);
+      return { success: false, error: `Ошибка соединения: ${error.message}` };
+    }
+  };
+
   const saveMessage = async (role, content) => {
     if (!currentChatId) return;
 
@@ -271,6 +319,97 @@ export default function AkaAI({ user }) {
     setMessages(prev => [...prev, newUserMsg]);
     await saveMessage('user', userMessage);
     
+    // Проверка подтверждения отправки Telegram сообщения
+    if (pendingTelegramMessage) {
+      const confirmation = userMessage.toLowerCase();
+      
+      if (confirmation === 'да' || confirmation === 'yes' || confirmation === 'отправить' || confirmation === '+') {
+        setIsLoading(true);
+        
+        const result = await sendTelegramMessage(pendingTelegramMessage.username, pendingTelegramMessage.text);
+        
+        const responseTimestamp = new Date().toISOString();
+        if (result.success) {
+          const successMsg = `✅ Сообщение успешно отправлено пользователю ${result.name} (@${pendingTelegramMessage.username}) в Telegram!`;
+          setMessages(prev => [...prev, { role: 'assistant', content: successMsg, timestamp: responseTimestamp }]);
+          await saveMessage('assistant', successMsg);
+        } else {
+          const errorMsg = `❌ ${result.error}`;
+          setMessages(prev => [...prev, { role: 'assistant', content: errorMsg, timestamp: responseTimestamp }]);
+          await saveMessage('assistant', errorMsg);
+        }
+        
+        setPendingTelegramMessage(null);
+        setIsLoading(false);
+        return;
+      } else if (confirmation === 'нет' || confirmation === 'no' || confirmation === 'отмена' || confirmation === '-') {
+        const cancelTimestamp = new Date().toISOString();
+        const cancelMsg = '❌ Отправка отменена.';
+        setMessages(prev => [...prev, { role: 'assistant', content: cancelMsg, timestamp: cancelTimestamp }]);
+        await saveMessage('assistant', cancelMsg);
+        setPendingTelegramMessage(null);
+        return;
+      }
+    }
+
+    // Проверка команды "отправь сообщение"
+    const sendMessageRegex = /^отправь\s+сообщение\s+(@?[\w]+)\s+(.+)$/i;
+    const match = userMessage.match(sendMessageRegex);
+    
+    if (match) {
+      const username = match[1].replace('@', '');
+      const originalText = match[2];
+      
+      setIsLoading(true);
+      
+      // Просим AI исправить текст
+      const correctionPrompt = `Исправь грамматические и орфографические ошибки в этом тексте, сохраняя смысл и стиль. Если ошибок нет, верни текст как есть. Отвечай ТОЛЬКО исправленным текстом без пояснений:\n\n"${originalText}"`;
+      
+      try {
+        const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+        
+        const response = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': GEMINI_API_KEY
+          },
+          body: JSON.stringify({
+            contents: [{
+              role: 'user',
+              parts: [{ text: correctionPrompt }]
+            }]
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('AI correction failed');
+        }
+
+        const data = await response.json();
+        const correctedText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || originalText;
+        
+        // Сохраняем для подтверждения
+        setPendingTelegramMessage({ username, text: correctedText });
+        
+        const confirmTimestamp = new Date().toISOString();
+        const confirmMsg = `📱 Готово! Вот ваше сообщение для @${username}:\n\n"${correctedText}"\n\n🤔 Отправить? (Ответьте: да/нет)`;
+        setMessages(prev => [...prev, { role: 'assistant', content: confirmMsg, timestamp: confirmTimestamp }]);
+        await saveMessage('assistant', confirmMsg);
+        
+        setIsLoading(false);
+        return;
+      } catch (error) {
+        console.error('Error:', error);
+        const errorTimestamp = new Date().toISOString();
+        const errorMsg = `❌ Ошибка при обработке сообщения: ${error.message}`;
+        setMessages(prev => [...prev, { role: 'assistant', content: errorMsg, timestamp: errorTimestamp }]);
+        await saveMessage('assistant', errorMsg);
+        setIsLoading(false);
+        return;
+      }
+    }
+    
     setIsLoading(true);
 
     try {
@@ -278,6 +417,12 @@ export default function AkaAI({ user }) {
       const systemData = await getSystemData();
       
       const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+      
+      // Текущее время в Астане (UTC+5)
+      const now = new Date();
+      const astanaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Almaty' }));
+      const currentTime = astanaTime.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const currentDate = astanaTime.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
       
       // Формируем данные о продавцах
       let sellersInfo = '';
@@ -378,6 +523,8 @@ export default function AkaAI({ user }) {
 Ты — akaAI, личный интеллектуальный ассистент владельца системы Qaraa CRM (${user.fullname}).
 Ты — центральный ИИ-модуль, который помогает управлять продажами, сотрудниками и эффективностью бизнеса.
 
+⏰ ТЕКУЩЕЕ ВРЕМЯ В АСТАНЕ: ${currentTime} | ${currentDate}
+
 У ТЕБЯ ЕСТЬ ПОЛНЫЙ ДОСТУП К СИСТЕМЕ:
 ${sellersInfo}
 ${activityInfo}
@@ -392,6 +539,13 @@ ${securityInfo}
 • Отслеживаешь активность: кто в NewSale, кто в Аналитике, кто в Истории продаж
 • Даёшь характеристику каждому продавцу на основе данных
 • Находишь закономерности и проблемы в работе
+
+📱 TELEGRAM ИНТЕГРАЦИЯ:
+• Владелец может отправлять сообщения продавцам через Telegram
+• Команда: "отправь сообщение [username] [текст]"
+• Пример: "отправь сообщение sen Приходи завтра в 9:00"
+• Ты автоматически исправишь текст (если есть ошибки) и попросишь подтверждение
+• Если владелец спросит как отправить сообщение - объясни эту команду
 
 ТВОЯ ЗАДАЧА:
 • Анализировать действия продавцов и находить сильные/слабые стороны
@@ -434,6 +588,13 @@ ${securityInfo}
 • Если вопрос не ясен — уточняй кратко, не додумывай сам
 • Понимай приоритеты владельца: прибыль, дисциплина, активность
 • Всегда подстраивай ответы под цель владельца (не просто ответ, а решение)
+
+ВАЖНО - ВРЕМЯ:
+• Если владелец СПРАШИВАЕТ время ("время", "скажи время", "который час") - отвечай ТОЧНЫМ временем из "ТЕКУЩЕЕ ВРЕМЯ В АСТАНЕ"
+• В остальных случаях НЕ ПИШИ точное время сам по себе
+• Используй относительное время: "В данный момент", "Прямо сейчас", "Сегодня"
+• Пример правильно: Владелец: "время?" → Ты: "20:16 (11.10.2025)"
+• Пример неправильно: Сам написал "Сейчас 20:05" без запроса владельца
 
 Когда владелец спрашивает о продавце или ситуации — используй данные выше для точного ответа.
 `;
@@ -565,6 +726,12 @@ ${securityInfo}
       const systemData = await getSystemData();
       const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
       
+      // Текущее время в Астане (UTC+5)
+      const now = new Date();
+      const astanaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Almaty' }));
+      const currentTime = astanaTime.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const currentDate = astanaTime.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      
       let sellersInfo = '';
       if (systemData?.sellers) {
         sellersInfo = '\n\n📊 ДАННЫЕ О ПРОДАВЦАХ:\n';
@@ -657,6 +824,8 @@ ${securityInfo}
       const systemContext = `
 Ты — akaAI, личный интеллектуальный ассистент владельца системы Qaraa CRM (${user.fullname}).
 
+⏰ ТЕКУЩЕЕ ВРЕМЯ В АСТАНЕ: ${currentTime} | ${currentDate}
+
 У ТЕБЯ ЕСТЬ ПОЛНЫЙ ДОСТУП К СИСТЕМЕ:
 ${sellersInfo}
 ${activityInfo}
@@ -670,6 +839,13 @@ ${securityInfo}
 • Используй только: простой текст + эмодзи + переносы строк
 • Пример правильно: "Serik - 5 продаж 🏆"
 • Не выдумывай факты — отвечай только по тем данным, что в системе
+
+ВАЖНО - ВРЕМЯ:
+• Если владелец СПРАШИВАЕТ время ("время", "скажи время", "который час") - отвечай ТОЧНЫМ временем из "ТЕКУЩЕЕ ВРЕМЯ В АСТАНЕ"
+• В остальных случаях НЕ ПИШИ точное время сам по себе
+• Используй относительное время: "В данный момент", "Прямо сейчас", "Сегодня"
+• Пример правильно: Владелец: "время?" → Ты: "20:16 (11.10.2025)"
+• Пример неправильно: Сам написал "Сейчас 20:05" без запроса владельца
 `;
 
       const conversationHistory = messages.slice(-5).map(m => ({
@@ -737,6 +913,12 @@ ${securityInfo}
       const systemData = await getSystemData();
       
       const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+      
+      // Текущее время в Астане (UTC+5)
+      const now = new Date();
+      const astanaTime = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Almaty' }));
+      const currentTime = astanaTime.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+      const currentDate = astanaTime.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
       
       // Формируем данные о продавцах
       let sellersInfo = '';
@@ -837,6 +1019,8 @@ ${securityInfo}
 Ты — akaAI, личный интеллектуальный ассистент владельца системы Qaraa CRM (${user.fullname}).
 Ты — центральный ИИ-модуль, который помогает управлять продажами, сотрудниками и эффективностью бизнеса.
 
+⏰ ТЕКУЩЕЕ ВРЕМЯ В АСТАНЕ: ${currentTime} | ${currentDate}
+
 У ТЕБЯ ЕСТЬ ПОЛНЫЙ ДОСТУП К СИСТЕМЕ:
 ${sellersInfo}
 ${activityInfo}
@@ -851,6 +1035,13 @@ ${securityInfo}
 • Отслеживаешь активность: кто в NewSale, кто в Аналитике, кто в Истории продаж
 • Даёшь характеристику каждому продавцу на основе данных
 • Находишь закономерности и проблемы в работе
+
+📱 TELEGRAM ИНТЕГРАЦИЯ:
+• Владелец может отправлять сообщения продавцам через Telegram
+• Команда: "отправь сообщение [username] [текст]"
+• Пример: "отправь сообщение sen Приходи завтра в 9:00"
+• Ты автоматически исправишь текст (если есть ошибки) и попросишь подтверждение
+• Если владелец спросит как отправить сообщение - объясни эту команду
 
 ТВОЯ ЗАДАЧА:
 • Анализировать действия продавцов и находить сильные/слабые стороны
@@ -893,6 +1084,13 @@ ${securityInfo}
 • Если вопрос не ясен — уточняй кратко, не додумывай сам
 • Понимай приоритеты владельца: прибыль, дисциплина, активность
 • Всегда подстраивай ответы под цель владельца (не просто ответ, а решение)
+
+ВАЖНО - ВРЕМЯ:
+• Если владелец СПРАШИВАЕТ время ("время", "скажи время", "который час") - отвечай ТОЧНЫМ временем из "ТЕКУЩЕЕ ВРЕМЯ В АСТАНЕ"
+• В остальных случаях НЕ ПИШИ точное время сам по себе
+• Используй относительное время: "В данный момент", "Прямо сейчас", "Сегодня"
+• Пример правильно: Владелец: "время?" → Ты: "20:16 (11.10.2025)"
+• Пример неправильно: Сам написал "Сейчас 20:05" без запроса владельца
 
 Когда владелец спрашивает о продавце или ситуации — используй данные выше для точного ответа.
 `;
@@ -1215,16 +1413,74 @@ ${securityInfo}
                 fontSize: '17px',
                 fontWeight: '600',
                 color: '#1d1d1f',
-                marginBottom: '2px'
+                marginBottom: '8px'
               }}>
                 akaAI
               </div>
+              
+              {/* Переключатель режимов */}
               <div style={{
-                fontSize: '13px',
-                color: '#86868b',
-                fontWeight: '400'
+                display: 'flex',
+                gap: '8px',
+                background: 'rgba(0, 0, 0, 0.04)',
+                padding: '4px',
+                borderRadius: '10px',
+                width: 'fit-content'
               }}>
-                Ассистент для {user?.fullname}
+                <button
+                  onClick={() => setChatMode('ai')}
+                  style={{
+                    padding: '6px 16px',
+                    background: chatMode === 'ai' ? 'white' : 'transparent',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: chatMode === 'ai' ? '#007AFF' : '#86868b',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: chatMode === 'ai' ? '0 2px 4px rgba(0, 0, 0, 0.08)' : 'none'
+                  }}
+                >
+                  🤖 AI Ассистент
+                </button>
+                <button
+                  onClick={() => setChatMode('messages')}
+                  style={{
+                    padding: '6px 16px',
+                    background: chatMode === 'messages' ? 'white' : 'transparent',
+                    border: 'none',
+                    borderRadius: '8px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: chatMode === 'messages' ? '#007AFF' : '#86868b',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: chatMode === 'messages' ? '0 2px 4px rgba(0, 0, 0, 0.08)' : 'none',
+                    position: 'relative'
+                  }}
+                >
+                  💬 Сообщения
+                  {unreadMessages > 0 && (
+                    <span style={{
+                      position: 'absolute',
+                      top: '2px',
+                      right: '2px',
+                      width: '16px',
+                      height: '16px',
+                      background: '#FF3B30',
+                      borderRadius: '50%',
+                      fontSize: '10px',
+                      color: 'white',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: '700'
+                    }}>
+                      {unreadMessages}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -1265,6 +1521,8 @@ ${securityInfo}
             flexDirection: 'column',
             gap: '16px'
           }}>
+            {chatMode === 'ai' ? (
+              <>
             {messages.map((msg, index) => (
               <div
                 key={index}
@@ -1336,6 +1594,55 @@ ${securityInfo}
             )}
 
             <div ref={messagesEndRef} />
+            </>
+            ) : (
+              /* Режим сообщений с продавцами */
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                flexDirection: 'column',
+                gap: '16px'
+              }}>
+                <div style={{
+                  fontSize: '48px'
+                }}>
+                  💬
+                </div>
+                <div style={{
+                  fontSize: '20px',
+                  fontWeight: '600',
+                  color: '#1d1d1f'
+                }}>
+                  Сообщения с продавцами
+                </div>
+                <div style={{
+                  fontSize: '15px',
+                  color: '#86868b',
+                  textAlign: 'center',
+                  maxWidth: '400px',
+                  lineHeight: '1.5'
+                }}>
+                  Здесь будут отображаться сообщения от продавцов.{'\n'}
+                  Пока нет новых сообщений.
+                </div>
+                <div style={{
+                  marginTop: '16px',
+                  padding: '16px 24px',
+                  background: 'rgba(0, 122, 255, 0.1)',
+                  borderRadius: '16px',
+                  fontSize: '14px',
+                  color: '#007AFF',
+                  textAlign: 'center',
+                  lineHeight: '1.6'
+                }}>
+                  💡 Совет: Переключитесь на "AI Ассистент" чтобы{'\n'}
+                  отправить сообщение продавцу через команду:{'\n'}
+                  <strong>"отправь сообщение [username] [текст]"</strong>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Input Area */}
@@ -1346,7 +1653,44 @@ ${securityInfo}
             WebkitBackdropFilter: 'blur(40px) saturate(180%)',
             borderTop: '1px solid rgba(0, 0, 0, 0.06)'
           }}>
+            {/* Кнопка toggle для Quick Buttons - только в режиме AI */}
+            {chatMode === 'ai' && (
+              <div style={{
+                maxWidth: '1000px',
+                margin: '0 auto 12px auto',
+                display: 'flex',
+                justifyContent: 'center'
+              }}>
+                <button
+                  onClick={() => setShowQuickButtons(!showQuickButtons)}
+                  style={{
+                    padding: '8px 16px',
+                    background: showQuickButtons ? 'rgba(102, 126, 234, 0.1)' : 'rgba(0, 0, 0, 0.04)',
+                    border: '1px solid ' + (showQuickButtons ? 'rgba(102, 126, 234, 0.3)' : 'rgba(0, 0, 0, 0.06)'),
+                    borderRadius: '20px',
+                    color: showQuickButtons ? '#667eea' : '#86868b',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.transform = 'scale(1.02)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  {showQuickButtons ? '🔽' : '▶️'} {showQuickButtons ? 'Скрыть' : 'Показать'} AI кнопки
+                </button>
+              </div>
+            )}
+
             {/* Power Buttons - AI одной кнопкой */}
+            {chatMode === 'ai' && showQuickButtons && (
             <div style={{
               maxWidth: '1000px',
               margin: '0 auto 16px auto'
@@ -1434,8 +1778,10 @@ ${securityInfo}
                 ))}
               </div>
             </div>
+            )}
 
             {/* Quick Commands */}
+            {chatMode === 'ai' && showQuickButtons && (
             <div style={{
               maxWidth: '1000px',
               margin: '0 auto 12px auto',
@@ -1482,7 +1828,10 @@ ${securityInfo}
                 </button>
               ))}
             </div>
+            )}
 
+            {/* Input - только в режиме AI */}
+            {chatMode === 'ai' && (
             <div style={{
               display: 'flex',
               gap: '12px',
@@ -1563,6 +1912,7 @@ ${securityInfo}
                 </button>
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>
