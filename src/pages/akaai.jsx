@@ -10,7 +10,7 @@ export default function AkaAI({ user }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(window.innerWidth > 768);
   const [time, setTime] = useState(new Date());
   const [userRole, setUserRole] = useState(null);
   const [pendingTelegramMessage, setPendingTelegramMessage] = useState(null);
@@ -27,6 +27,7 @@ export default function AkaAI({ user }) {
   const [chatIdInput, setChatIdInput] = useState('');
   const [showClearChatModal, setShowClearChatModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const messagesListRef = useRef(null);
@@ -64,6 +65,17 @@ export default function AkaAI({ user }) {
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth <= 768;
+      setIsMobile(mobile);
+      setShowSidebar(!mobile);
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   useEffect(() => {
@@ -1397,22 +1409,29 @@ ${securityInfo}
     <>
       <div style={{
         minHeight: '100vh',
+        height: '100vh',
         background: 'linear-gradient(to bottom, #f5f5f7 0%, #e8e8ed 100%)',
         display: 'flex',
         fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
-        position: 'relative'
+        position: 'relative',
+        overflow: 'hidden'
       }}>
         {/* Sidebar */}
         {showSidebar && (
           <div style={{
-            width: '280px',
-            background: 'rgba(255, 255, 255, 0.8)',
+            width: isMobile ? '100%' : '280px',
+            background: 'rgba(255, 255, 255, 0.95)',
             backdropFilter: 'blur(40px) saturate(180%)',
             WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-            borderRight: '1px solid rgba(0, 0, 0, 0.06)',
+            borderRight: isMobile ? 'none' : '1px solid rgba(0, 0, 0, 0.06)',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '4px 0 24px rgba(0, 0, 0, 0.04)'
+            boxShadow: '4px 0 24px rgba(0, 0, 0, 0.04)',
+            position: isMobile ? 'fixed' : 'relative',
+            top: 0,
+            left: 0,
+            height: isMobile ? '100vh' : 'auto',
+            zIndex: 1000
           }}>
             {/* Sidebar Header */}
             <div style={{
@@ -1581,14 +1600,14 @@ ${securityInfo}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Header */}
           <div style={{
-            padding: '20px 24px',
+            padding: isMobile ? '16px' : '20px 24px',
             background: 'rgba(255, 255, 255, 0.8)',
             backdropFilter: 'blur(40px) saturate(180%)',
             WebkitBackdropFilter: 'blur(40px) saturate(180%)',
             borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
             display: 'flex',
             alignItems: 'center',
-            gap: '16px',
+            gap: isMobile ? '12px' : '16px',
             boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
             flexShrink: 0
           }}>
@@ -1646,7 +1665,7 @@ ${securityInfo}
               {/* Переключатель режимов */}
               <div style={{
                 display: 'flex',
-                gap: '8px',
+                gap: isMobile ? '6px' : '8px',
                 background: 'rgba(0, 0, 0, 0.04)',
                 padding: '4px',
                 borderRadius: '10px',
@@ -1655,37 +1674,39 @@ ${securityInfo}
                 <button
                   onClick={() => setChatMode('ai')}
                   style={{
-                    padding: '6px 16px',
+                    padding: isMobile ? '6px 12px' : '6px 16px',
                     background: chatMode === 'ai' ? 'white' : 'transparent',
                     border: 'none',
                     borderRadius: '8px',
-                    fontSize: '13px',
+                    fontSize: isMobile ? '12px' : '13px',
                     fontWeight: '600',
                     color: chatMode === 'ai' ? '#007AFF' : '#86868b',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
-                    boxShadow: chatMode === 'ai' ? '0 2px 4px rgba(0, 0, 0, 0.08)' : 'none'
+                    boxShadow: chatMode === 'ai' ? '0 2px 4px rgba(0, 0, 0, 0.08)' : 'none',
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  🤖 AI Ассистент
+                  {isMobile ? '🤖 AI' : '🤖 AI Ассистент'}
                 </button>
                 <button
                   onClick={() => setChatMode('messages')}
                   style={{
-                    padding: '6px 16px',
+                    padding: isMobile ? '6px 12px' : '6px 16px',
                     background: chatMode === 'messages' ? 'white' : 'transparent',
                     border: 'none',
                     borderRadius: '8px',
-                    fontSize: '13px',
+                    fontSize: isMobile ? '12px' : '13px',
                     fontWeight: '600',
                     color: chatMode === 'messages' ? '#007AFF' : '#86868b',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
                     boxShadow: chatMode === 'messages' ? '0 2px 4px rgba(0, 0, 0, 0.08)' : 'none',
-                    position: 'relative'
+                    position: 'relative',
+                    whiteSpace: 'nowrap'
                   }}
                 >
-                  💬 Сообщения
+                  {isMobile ? '💬' : '💬 Сообщения'}
                   {unreadMessages > 0 && (
                     <span style={{
                       position: 'absolute',
@@ -1741,7 +1762,7 @@ ${securityInfo}
           <div style={{
             flex: 1,
             overflowY: 'auto',
-            padding: '24px',
+            padding: isMobile ? '16px' : '24px',
             display: 'flex',
             flexDirection: 'column',
             gap: '16px'
@@ -1759,7 +1780,7 @@ ${securityInfo}
                 }}
               >
                 <div style={{
-                  maxWidth: '70%',
+                  maxWidth: isMobile ? '90%' : '70%',
                   padding: '12px 16px',
                   background: msg.role === 'user' 
                     ? 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)'
@@ -1825,12 +1846,12 @@ ${securityInfo}
               <div style={{ display: 'flex', height: '100%', gap: '1px' }}>
                 {/* Список продавцов */}
                 <div style={{
-                  width: '320px',
+                  width: isMobile ? '100%' : '320px',
                   background: 'rgba(255, 255, 255, 0.8)',
                   backdropFilter: 'blur(40px) saturate(180%)',
                   WebkitBackdropFilter: 'blur(40px) saturate(180%)',
                   borderRight: '1px solid rgba(0, 0, 0, 0.06)',
-                  display: 'flex',
+                  display: (isMobile && selectedSeller) ? 'none' : 'flex',
                   flexDirection: 'column',
                   overflow: 'hidden'
                 }}>
@@ -2006,12 +2027,19 @@ ${securityInfo}
                 </div>
 
                 {/* Окно чата */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f7', overflow: 'hidden' }}>
+                <div style={{ 
+                  flex: 1, 
+                  display: (isMobile && !selectedSeller) ? 'none' : 'flex', 
+                  flexDirection: 'column', 
+                  background: '#f5f5f7', 
+                  overflow: 'hidden',
+                  width: isMobile ? '100%' : 'auto'
+                }}>
                   {selectedSeller ? (
                     <>
                       {/* Шапка чата */}
                       <div style={{
-                        padding: '16px 24px',
+                        padding: isMobile ? '16px' : '16px 24px',
                         background: 'rgba(255, 255, 255, 0.9)',
                         backdropFilter: 'blur(40px)',
                         borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
@@ -2020,6 +2048,32 @@ ${securityInfo}
                         gap: '12px',
                         flexShrink: 0
                       }}>
+                        {isMobile && (
+                          <button
+                            onClick={() => setSelectedSeller(null)}
+                            style={{
+                              padding: '8px',
+                              background: 'transparent',
+                              border: 'none',
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'background 0.2s ease'
+                            }}
+                            onMouseOver={(e) => {
+                              e.currentTarget.style.background = 'rgba(0, 0, 0, 0.06)';
+                            }}
+                            onMouseOut={(e) => {
+                              e.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                              <path d="M15 18L9 12L15 6" stroke="#1d1d1f" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </button>
+                        )}
                         <div style={{
                           width: '40px',
                           height: '40px',
@@ -2074,7 +2128,7 @@ ${securityInfo}
                         style={{
                           flex: 1,
                           overflowY: 'auto',
-                          padding: '24px',
+                          padding: isMobile ? '16px' : '24px',
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '12px'
@@ -2100,7 +2154,7 @@ ${securityInfo}
                                 }}
                               >
                                 <div style={{
-                                  maxWidth: '70%',
+                                  maxWidth: isMobile ? '90%' : '70%',
                                   padding: '12px 16px',
                                   background: isFromOwner 
                                     ? 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)'
@@ -2135,7 +2189,7 @@ ${securityInfo}
 
                       {/* Поле ввода */}
                       <div style={{
-                        padding: '16px 24px',
+                        padding: isMobile ? '12px 16px' : '16px 24px',
                         background: 'rgba(255, 255, 255, 0.9)',
                         backdropFilter: 'blur(40px)',
                         borderTop: '1px solid rgba(0, 0, 0, 0.06)',
@@ -2241,7 +2295,7 @@ ${securityInfo}
 
           {/* Input Area */}
           <div style={{
-            padding: '16px 24px 24px 24px',
+            padding: isMobile ? '12px 16px 16px 16px' : '16px 24px 24px 24px',
             background: 'rgba(255, 255, 255, 0.8)',
             backdropFilter: 'blur(40px) saturate(180%)',
             WebkitBackdropFilter: 'blur(40px) saturate(180%)',
