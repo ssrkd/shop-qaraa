@@ -17,6 +17,25 @@ export default function SalesHistory({ user }) {
     fetchSales();
   }, []);
 
+  // Обновляем текущую страницу при заходе
+  useEffect(() => {
+    if (!user) return;
+
+    const updateCurrentPage = async () => {
+      await supabase
+        .from('user_login_status')
+        .update({
+          current_page: 'История продаж',
+          page_entered_at: new Date().toISOString(),
+          last_active: new Date().toISOString()
+        })
+        .eq('user_id', user.id)
+        .eq('is_logged_in', true);
+    };
+
+    updateCurrentPage();
+  }, [user]);
+
   async function fetchSales() {
     setLoading(true);
     const today = new Date();
@@ -97,39 +116,49 @@ export default function SalesHistory({ user }) {
           <title>Чек</title>
           <style>
             @page {
-              size: 57mm auto;
+              size: 58mm auto;
               margin: 0;
             }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
-              width: 57mm;
+              width: 58mm;
               margin: 0;
-              padding: 2mm;
+              padding: 5mm 3mm;
               font-family: 'Courier New', monospace;
               font-size: 11px;
-              line-height: 1.3;
+              line-height: 1.4;
+              background: white;
             }
             .center { text-align: center; }
-            .bold { font-weight: bold; }
-            .line { border-top: 1px dashed #000; margin: 4px 0; }
+            .bold { font-weight: 700; }
+            .line { border-top: 1px dashed #000; margin: 3mm 0; }
             .row { 
               display: flex;
-              gap: 5px;
+              justify-content: space-between;
+              margin: 2mm 0;
             }
             .row span:first-child {
-              flex-shrink: 0;
+              font-weight: 600;
             }
             .row span:last-child {
               text-align: right;
-              flex-grow: 1;
+              font-weight: 700;
             }
             .footer { 
-              margin-top: 8px; 
+              margin-top: 5mm; 
               text-align: center; 
               font-size: 10px; 
             }
+            .header {
+              font-size: 18px;
+              font-weight: 700;
+              margin-bottom: 2mm;
+            }
             @media print {
               body {
-                padding: 2mm;
+                padding: 5mm 3mm;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
               }
               html, body {
                 height: auto;
@@ -138,28 +167,45 @@ export default function SalesHistory({ user }) {
           </style>
         </head>
         <body>
-          <div class="center bold">qaraa</div>
-          <div class="center">Чек продажи</div>
+          <div class="center header">qaraa</div>
+          <div class="center" style="margin-bottom: 3mm;">Чек продажи</div>
           <div class="line"></div>
-          <div>Продавец: ${sale.seller_id}</div>
-          <div>Товар: ${sale.product}</div>
-          <div>Размер: ${sale.size}</div>
-          <div>Количество: ${sale.quantity}</div>
-          <div>Цена: ${sale.price} ₸</div>
+          <div class="row">
+            <span>Продавец:</span>
+            <span>${sale.seller_id}</span>
+          </div>
+          <div class="row">
+            <span>Товар:</span>
+            <span>${sale.product}</span>
+          </div>
+          <div class="row">
+            <span>Размер:</span>
+            <span>${sale.size}</span>
+          </div>
+          <div class="row">
+            <span>Количество:</span>
+            <span>${sale.quantity} шт</span>
+          </div>
+          <div class="row">
+            <span>Цена:</span>
+            <span>${sale.price} ₸</span>
+          </div>
           <div class="row">
             <span>Оплата:</span>
             <span>${sale.payment_method}</span>
           </div>
           <div class="line"></div>
-          <div class="row bold">
+          <div class="row bold" style="font-size: 13px;">
             <span>ИТОГО:</span>
             <span>${(parseFloat(sale.price) * sale.quantity).toFixed(2)} ₸</span>
           </div>
           <div class="line"></div>
-          <div class="center">${new Date(sale.created_at).toLocaleString('ru-RU')}</div>
+          <div class="center" style="font-size: 10px; margin-bottom: 3mm;">
+            ${new Date(sale.created_at).toLocaleString('ru-RU')}
+          </div>
           <div class="footer">
-            qaraa.kz<br>
-            Спасибо за покупку!
+            <div style="font-weight: 700; margin-bottom: 2mm;">qaraa.kz</div>
+            <div>Спасибо за покупку!</div>
           </div>
         </body>
       </html>

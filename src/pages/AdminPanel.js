@@ -50,6 +50,25 @@ export default function AdminPanel({ onBack, user }) {
     fetchRole();
   }, [user, navigate]);
 
+  // Обновляем текущую страницу при заходе
+  useEffect(() => {
+    if (!user) return;
+
+    const updateCurrentPage = async () => {
+      await supabase
+        .from('user_login_status')
+        .update({
+          current_page: 'Админ-панель',
+          page_entered_at: new Date().toISOString(),
+          last_active: new Date().toISOString()
+        })
+        .eq('user_id', user.id)
+        .eq('is_logged_in', true);
+    };
+
+    updateCurrentPage();
+  }, [user]);
+
   useEffect(() => {
     if (activeTab === "sales") fetchSales();
     if (activeTab === "products") fetchProducts();
@@ -85,6 +104,154 @@ export default function AdminPanel({ onBack, user }) {
       .select("id, name, barcode, product_variants(id, size, quantity, price)")
       .order("id");
     if (!error) setProducts(data);
+  }
+
+  function printLabel(product, variant) {
+    const labelWindow = window.open('', '_blank');
+    
+    labelWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Этикетка - ${product.name}</title>
+        <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+        <style>
+          @page {
+            size: 50.8mm 101.6mm portrait;
+            margin: 0;
+          }
+          
+          html, body {
+            width: 50.8mm;
+            height: 101.6mm;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+          }
+          
+          body {
+            font-family: 'Arial', sans-serif;
+            background: white;
+          }
+          
+          .label-container {
+            width: 48mm;
+            height: 95mm;
+            margin: 0 auto;
+            padding: 2mm;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+          }
+          
+          .product-name {
+            font-size: 8pt;
+            font-weight: bold;
+            text-align: center;
+            line-height: 1.1;
+            margin-bottom: 2mm;
+            width: 100%;
+            max-height: 12mm;
+            overflow: hidden;
+            word-wrap: break-word;
+          }
+          
+          .barcode-section {
+            text-align: center;
+            margin: 2mm 0 3mm 0;
+            width: 100%;
+          }
+          
+          #barcode {
+            max-width: 100%;
+            height: auto;
+          }
+          
+          .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            font-size: 9pt;
+            font-weight: bold;
+            padding-top: 2mm;
+            border-top: 1px dashed #999;
+          }
+          
+          .size {
+            background: black;
+            color: white;
+            padding: 1.5mm 3mm;
+            border-radius: 1.5mm;
+            font-size: 8pt;
+          }
+          
+          .price {
+            font-size: 10pt;
+            font-weight: bold;
+          }
+          
+          @media print {
+            @page {
+              size: 50.8mm 101.6mm portrait;
+              margin: 0;
+            }
+            
+            html, body {
+              width: 50.8mm !important;
+              height: 101.6mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+            }
+            
+            body {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="label-container">
+          <div class="product-name">${product.name}</div>
+          
+          <div class="barcode-section">
+            <svg id="barcode"></svg>
+          </div>
+          
+          <div class="info-row">
+            <span class="size">${variant.size}</span>
+            <span class="price">${variant.price} ₸</span>
+          </div>
+        </div>
+        
+        <script>
+          try {
+            JsBarcode("#barcode", "${product.barcode}", {
+              format: "CODE128",
+              width: 1.6,
+              height: 35,
+              displayValue: true,
+              fontSize: 10,
+              margin: 1,
+              background: "#ffffff"
+            });
+          } catch(e) {
+            console.error("Ошибка генерации штрих-кода:", e);
+          }
+          
+          setTimeout(() => {
+            window.print();
+          }, 500);
+        </script>
+      </body>
+      </html>
+    `);
+    
+    labelWindow.document.close();
   }
 
   async function fetchProfit(period, paymentType = "all") {
@@ -192,10 +359,72 @@ export default function AdminPanel({ onBack, user }) {
 
   function exportToExcel(data, sheetName = "Sheet1", fileName = "data.xlsx") {
     if (!data || !data.length) return;
+    
+    // Создаем worksheet из данных
     const ws = XLSX.utils.json_to_sheet(data);
+    
+    // Определяем границы для всех ячеек
+    const border = {
+      top: { style: "thin", color: { rgb: "CCCCCC" } },
+      bottom: { style: "thin", color: { rgb: "CCCCCC" } },
+      left: { style: "thin", color: { rgb: "CCCCCC" } },
+      right: { style: "thin", color: { rgb: "CCCCCC" } }
+    };
+    
+    // Стиль для заголовков
+    const headerStyle = {
+      font: { bold: true, color: { rgb: "000000" } },
+      fill: { fgColor: { rgb: "F5F5F5" } },
+      alignment: { vertical: "center", horizontal: "left" },
+      border: border
+    };
+    
+    // Стиль для обычных ячеек
+    const cellStyle = {
+      alignment: { vertical: "center", horizontal: "left", wrapText: false },
+      border: border
+    };
+    
+    // Получаем диапазон ячеек
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    
+    // Применяем стили к заголовкам (первая строка)
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: 0, c: col });
+      if (!ws[cellAddress]) continue;
+      ws[cellAddress].s = headerStyle;
+    }
+    
+    // Применяем стили к остальным ячейкам
+    for (let row = range.s.r + 1; row <= range.e.r; row++) {
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+        if (!ws[cellAddress]) continue;
+        ws[cellAddress].s = cellStyle;
+      }
+    }
+    
+    // Автоматическая ширина колонок
+    const colWidths = [];
+    const keys = Object.keys(data[0]);
+    keys.forEach((key, idx) => {
+      let maxWidth = key.length;
+      data.forEach(row => {
+        const cellValue = String(row[key] || '');
+        if (cellValue.length > maxWidth) {
+          maxWidth = cellValue.length;
+        }
+      });
+      colWidths.push({ wch: Math.min(maxWidth + 2, 50) }); // +2 для padding, max 50
+    });
+    ws['!cols'] = colWidths;
+    
+    // Создаем книгу и добавляем лист
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    
+    // Записываем файл с поддержкой стилей
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array", cellStyles: true });
     saveAs(new Blob([wbout], { type: "application/octet-stream" }), fileName);
   }
 
@@ -576,6 +805,7 @@ export default function AdminPanel({ onBack, user }) {
                           <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Размер</th>
                           <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Остаток</th>
                           <th style={{ padding: '16px', textAlign: 'left', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Цена</th>
+                          <th style={{ padding: '16px', textAlign: 'center', fontSize: '12px', fontWeight: '600', color: '#6b7280', textTransform: 'uppercase' }}>Действия</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -618,6 +848,39 @@ export default function AdminPanel({ onBack, user }) {
                                 </span>
                               </td>
                               <td style={{ padding: '16px', color: '#10b981', fontSize: '15px', fontWeight: '700' }}>{v.price} ₸</td>
+                              <td style={{ padding: '16px', textAlign: 'center' }}>
+                                <button
+                                  onClick={() => printLabel(p, v)}
+                                  style={{
+                                    padding: '8px 16px',
+                                    background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    fontSize: '13px',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    boxShadow: '0 2px 8px rgba(139, 92, 246, 0.2)'
+                                  }}
+                                  onMouseOver={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(139, 92, 246, 0.3)';
+                                  }}
+                                  onMouseOut={(e) => {
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(139, 92, 246, 0.2)';
+                                  }}
+                                >
+                                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                  </svg>
+                                  Этикетка
+                                </button>
+                              </td>
                             </tr>
                           ))
                         )}

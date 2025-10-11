@@ -41,6 +41,48 @@ export default function App({ onLogin }) {
           .update({ is_online: true })
           .eq('id', data.id);
 
+        // Получаем информацию о браузере и устройстве
+        const userAgent = navigator.userAgent;
+        const device = /Mobile|Android|iPhone|iPad|iPod/.test(userAgent) 
+          ? 'Телефон' 
+          : /Tablet|iPad/.test(userAgent) 
+          ? 'Планшет' 
+          : 'Компьютер';
+        
+        const browser = /Chrome/.test(userAgent) && !/Edg/.test(userAgent)
+          ? 'Chrome'
+          : /Safari/.test(userAgent) && !/Chrome/.test(userAgent)
+          ? 'Safari'
+          : /Firefox/.test(userAgent)
+          ? 'Firefox'
+          : /Edg/.test(userAgent)
+          ? 'Edge'
+          : 'Неизвестен';
+
+        // Получаем IP адрес пользователя
+        let ipAddress = 'неизвестен';
+        try {
+          const ipResponse = await fetch('https://api.ipify.org?format=json');
+          const ipData = await ipResponse.json();
+          ipAddress = ipData.ip;
+        } catch (error) {
+          console.log('Не удалось получить IP:', error);
+        }
+
+        // Обновляем user_login_status с данными о входе
+        await supabase
+          .from('user_login_status')
+          .upsert({
+            user_id: data.id,
+            is_logged_in: true,
+            ip_address: ipAddress,
+            device: device,
+            browser: browser,
+            last_active: new Date().toISOString()
+          }, {
+            onConflict: 'user_id'
+          });
+
         await supabase
           .from('logs')
           .insert([{
@@ -643,7 +685,7 @@ export default function App({ onLogin }) {
             </div>
 
 <div className="footer">
-  <p>Админ панель qaraa.crm | powered by Jarvis &copy; 2025.</p>
+  <p>Админ панель qaraa.crm | powered by aka &copy; 2025.</p>
   <p>Все права защищены. <span style={{ fontWeight: '600' }}>by srk.</span></p>
 </div>
 

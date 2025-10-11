@@ -42,6 +42,25 @@ export default function NewSale({ user, onBack }) {
     localStorage.setItem('cart', JSON.stringify(cart));
   }, [cart]);
 
+  // Обновляем текущую страницу при заходе
+  useEffect(() => {
+    if (!user) return;
+
+    const updateCurrentPage = async () => {
+      await supabase
+        .from('user_login_status')
+        .update({
+          current_page: 'Новая продажа',
+          page_entered_at: new Date().toISOString(),
+          last_active: new Date().toISOString()
+        })
+        .eq('user_id', user.id)
+        .eq('is_logged_in', true);
+    };
+
+    updateCurrentPage();
+  }, [user]);
+
   useEffect(() => {
     if (!barcode) {
       setProductName('');

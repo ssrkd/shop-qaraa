@@ -6,8 +6,8 @@ import Login from './pages/Login'
 import NewSale from './pages/NewSale'
 import AdminPanel from './pages/AdminPanel'
 import SalesHistory from './pages/SalesHistory'
-import Jarvis from './pages/jarvis'
 import AnalitikaHistory from './pages/AnalitikaHistory'
+import AkaAI from './pages/akaai'
 import '@fortawesome/fontawesome-free/css/all.min.css'
 
 function App() {
@@ -29,8 +29,14 @@ function App() {
   }
 
   const handleLogout = () => {
+    // Очищаем данные пользователя из localStorage
+    const userData = user;
     setUser(null)
     localStorage.removeItem('user')
+    // Очищаем метку входа из sessionStorage
+    if (userData) {
+      sessionStorage.removeItem(`logged_in_${userData.id}`)
+    }
   }
 
   if (loading) return <div>Загрузка...</div>
@@ -73,10 +79,10 @@ function App() {
           element={user ? <SalesHistory user={user} /> : <Navigate to="/login" />}
         />
 
-        {/* Jarvis */}
+        {/* akaAI */}
         <Route
-          path="/jarvis"
-          element={user ? <Jarvis user={user} /> : <Navigate to="/login" />}
+          path="/akaai"
+          element={user ? <AkaAI user={user} /> : <Navigate to="/login" />}
         />
 
         {/* AnalitikaHistory */}

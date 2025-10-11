@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from 'react-router-dom';
 import { supabase } from "../supabaseClient";
+import kaspiLogo from '../images/kaspi.svg';
+import halykLogo from '../images/halyk.svg';
+import cashLogo from '../images/cash.png';
 
 export default function AnalitikaHistory({ user }) {
   const navigate = useNavigate();
@@ -9,12 +12,36 @@ export default function AnalitikaHistory({ user }) {
   const [cash, setCash] = useState(0);
   const [mixed, setMixed] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [kaspiFact, setKaspiFact] = useState('');
+  const [halykFact, setHalykFact] = useState('');
+  const [cashFact, setCashFact] = useState('');
+  const [showSuccess, setShowSuccess] = useState(false);
 
   const BOT_TOKEN = "8458767187:AAHV6sl14LzVt1Bnk49LvoR6QYg7MAvbYhA";
   const ADMIN_ID = "996317285";
 
   useEffect(() => {
     if (user?.fullname) fetchTodaySales();
+  }, [user]);
+
+  // Обновляем текущую страницу при заходе
+  useEffect(() => {
+    if (!user) return;
+
+    const updateCurrentPage = async () => {
+      await supabase
+        .from('user_login_status')
+        .update({
+          current_page: 'Аналитика продаж',
+          page_entered_at: new Date().toISOString(),
+          last_active: new Date().toISOString()
+        })
+        .eq('user_id', user.id)
+        .eq('is_logged_in', true);
+    };
+
+    updateCurrentPage();
   }, [user]);
 
   const fetchTodaySales = async () => {
@@ -78,7 +105,12 @@ export default function AnalitikaHistory({ user }) {
   const total = kaspi + halyk + cash;
 
   const printReport = () => {
-    const now = new Date().toLocaleString("ru-RU");
+    const now = new Date().toLocaleString("ru-RU", {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
     const printWindow = window.open("", "_blank");
     printWindow.document.write(`
       <html>
@@ -86,156 +118,183 @@ export default function AnalitikaHistory({ user }) {
           <meta charset="UTF-8" />
           <title>Отчёт за день</title>
           <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-              padding: 30px 20px;
-              max-width: 400px;
-              margin: 0 auto;
-              background: #f5f7fa;
+            @page {
+              size: 58mm auto;
+              margin: 0;
             }
-            .receipt {
+            * { 
+              margin: 0; 
+              padding: 0; 
+              box-sizing: border-box; 
+            }
+            body {
+              width: 58mm;
+              font-family: 'Courier New', monospace;
+              padding: 3mm 3mm 2mm 3mm;
+              margin: 0;
               background: white;
-              padding: 30px;
-              border-radius: 20px;
-              box-shadow: 0 20px 60px rgba(0,0,0,0.08);
+              font-size: 11px;
+              line-height: 1.3;
             }
             .header {
               text-align: center;
-              margin-bottom: 25px;
-              padding-bottom: 20px;
-              border-bottom: 2px dashed #e5e7eb;
+              padding-bottom: 2mm;
+              margin-bottom: 2mm;
+              border-bottom: 2px solid #000;
             }
             .logo {
-              font-size: 28px;
+              font-size: 22px;
               font-weight: 700;
-              color: #1a1a1a;
-              margin-bottom: 5px;
+              color: #000;
+              margin-bottom: 1mm;
               letter-spacing: -1px;
             }
-            .title {
-              font-size: 14px;
-              color: #6b7280;
-              font-weight: 500;
-            }
-            .seller-info {
-              text-align: center;
-              padding: 16px;
-              background: #fafafa;
-              border-radius: 12px;
-              margin-bottom: 20px;
-            }
-            .seller-name {
-              font-size: 18px;
+            .subtitle {
+              font-size: 10px;
+              color: #000;
               font-weight: 600;
-              color: #1a1a1a;
-              margin-bottom: 4px;
+              text-transform: uppercase;
             }
-            .date-time {
-              font-size: 13px;
-              color: #6b7280;
+            .divider {
+              border-top: 1px dashed #000;
+              margin: 2mm 0;
             }
-            .payment-section {
-              margin: 20px 0;
+            .section {
+              margin-bottom: 2mm;
+            }
+            .info-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 1mm;
+              padding: 0.5mm 0;
+            }
+            .label {
+              font-size: 10px;
+              color: #000;
+              font-weight: 600;
+            }
+            .value {
+              font-size: 10px;
+              color: #000;
+              font-weight: 700;
+              text-align: right;
             }
             .payment-row {
               display: flex;
               justify-content: space-between;
-              padding: 14px 0;
-              border-bottom: 1px solid #f3f4f6;
+              padding: 1.5mm 0;
+              border-bottom: 1px dotted #ccc;
+            }
+            .payment-row:last-child {
+              border-bottom: none;
             }
             .payment-label {
-              color: #6b7280;
-              font-size: 14px;
-              font-weight: 500;
-            }
-            .payment-value {
-              color: #1a1a1a;
+              font-size: 11px;
+              color: #000;
               font-weight: 600;
-              font-size: 14px;
             }
-            .total-section {
-              margin-top: 20px;
-              padding-top: 20px;
-              border-top: 2px dashed #e5e7eb;
+            .payment-amount {
+              font-size: 11px;
+              color: #000;
+              font-weight: 700;
+              text-align: right;
             }
-            .total {
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              padding: 20px;
-              background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
-              border-radius: 12px;
-              color: white;
+            .total-box {
+              margin-top: 2mm;
+              padding: 2.5mm;
+              background: #000;
+              text-align: center;
             }
             .total-label {
-              font-size: 16px;
+              font-size: 10px;
+              color: #fff;
               font-weight: 600;
+              text-transform: uppercase;
+              margin-bottom: 1mm;
             }
             .total-amount {
-              font-size: 28px;
+              font-size: 16px;
+              color: #fff;
               font-weight: 700;
             }
             .footer {
-              margin-top: 25px;
-              padding-top: 20px;
-              border-top: 2px dashed #e5e7eb;
+              margin-top: 2mm;
+              padding-top: 2mm;
+              border-top: 2px solid #000;
               text-align: center;
             }
-            .website {
-              font-size: 18px;
+            .brand {
+              font-size: 13px;
               font-weight: 700;
-              color: #1a1a1a;
+              color: #000;
+            }
+            .thank-you {
+              font-size: 9px;
+              color: #000;
+              margin-top: 0.5mm;
             }
             @media print {
-              body { background: white; padding: 0; }
-              .receipt { box-shadow: none; border-radius: 0; }
+              body {
+                background: white;
+                padding: 3mm 3mm 2mm 3mm;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              .total-box {
+                background: #000 !important;
+                color: #fff !important;
+              }
             }
           </style>
         </head>
         <body>
-          <div class="receipt">
-            <div class="header">
-              <div class="logo">qaraa</div>
-              <div class="title">Отчёт за день</div>
-            </div>
-            
-            <div class="seller-info">
-              <div class="seller-name">${user.fullname}</div>
-              <div class="date-time">${now}</div>
-            </div>
+          <div class="header">
+            <div class="logo">qaraa</div>
+            <div class="subtitle">Отчёт за день</div>
+          </div>
 
-            <div class="payment-section">
-              <div class="payment-row">
-                <span class="payment-label">Kaspi QR:</span>
-                <span class="payment-value">${kaspi.toFixed(2)} ₸</span>
-              </div>
-              <div class="payment-row">
-                <span class="payment-label">Halyk QR | Карта:</span>
-                <span class="payment-value">${halyk.toFixed(2)} ₸</span>
-              </div>
-              <div class="payment-row">
-                <span class="payment-label">Наличные:</span>
-                <span class="payment-value">${cash.toFixed(2)} ₸</span>
-              </div>
-              ${mixed > 0 ? `
-              <div class="payment-row">
-                <span class="payment-label">Смешанная оплата:</span>
-                <span class="payment-value">${mixed.toFixed(2)} ₸</span>
-              </div>
-              ` : ''}
+          <div class="section">
+            <div class="info-row">
+              <span class="label">Продавец:</span>
+              <span class="value">${user.fullname}</span>
             </div>
+            <div class="info-row">
+              <span class="label">Дата:</span>
+              <span class="value">${now}</span>
+            </div>
+          </div>
 
-            <div class="total-section">
-              <div class="total">
-                <span class="total-label">Итого касса:</span>
-                <span class="total-amount">${total.toFixed(2)} ₸</span>
-              </div>
-            </div>
+          <div class="divider"></div>
 
-            <div class="footer">
-              <div class="website">qaraa.kz</div>
+          <div class="section">
+            <div class="payment-row">
+              <span class="payment-label">Kaspi QR</span>
+              <span class="payment-amount">${kaspi.toLocaleString()} ₸</span>
             </div>
+            <div class="payment-row">
+              <span class="payment-label">Halyk QR | Карта</span>
+              <span class="payment-amount">${halyk.toLocaleString()} ₸</span>
+            </div>
+            <div class="payment-row">
+              <span class="payment-label">Наличные</span>
+              <span class="payment-amount">${cash.toLocaleString()} ₸</span>
+            </div>
+            ${mixed > 0 ? `
+            <div class="payment-row">
+              <span class="payment-label">Смешанная</span>
+              <span class="payment-amount">${mixed.toLocaleString()} ₸</span>
+            </div>
+            ` : ''}
+          </div>
+
+          <div class="total-box">
+            <div class="total-label">Итого касса</div>
+            <div class="total-amount">${total.toLocaleString()} ₸</div>
+          </div>
+
+          <div class="footer">
+            <div class="brand">qaraa.kz</div>
+            <div class="thank-you">Спасибо!</div>
           </div>
         </body>
       </html>
@@ -244,14 +303,14 @@ export default function AnalitikaHistory({ user }) {
     printWindow.print();
   };
 
-  const sendReport = async () => {
-    const kaspiFact = prompt("Kaspi терминал (по факту):", "0");
-    if (kaspiFact === null) return;
-    const halykFact = prompt("Halyk терминал (по факту):", "0");
-    if (halykFact === null) return;
-    const cashFact = prompt("Наличные по факту:", "0");
-    if (cashFact === null) return;
+  const openSendModal = () => {
+    setKaspiFact('');
+    setHalykFact('');
+    setCashFact('');
+    setShowModal(true);
+  };
 
+  const sendReport = async () => {
     const now = new Date().toLocaleString("ru-RU");
 
     const text = `
@@ -259,13 +318,13 @@ export default function AnalitikaHistory({ user }) {
 ${now}
 
 Kaspi QR CRM: ${kaspi.toFixed(2)} ₸
-Kaspi терминал: ${kaspiFact} ₸
+Kaspi терминал: ${kaspiFact || '0'} ₸
 ───────────────
 Halyk QR | Карта CRM: ${halyk.toFixed(2)} ₸
-Halyk терминал: ${halykFact} ₸
+Halyk терминал: ${halykFact || '0'} ₸
 ───────────────
 Наличные CRM: ${cash.toFixed(2)} ₸
-Наличные по факту: ${cashFact} ₸
+Наличные по факту: ${cashFact || '0'} ₸
 ───────────────${mixed > 0 ? `
 Смешанная оплата: ${mixed.toFixed(2)} ₸
 ───────────────` : ''}
@@ -281,10 +340,12 @@ Halyk терминал: ${halykFact} ₸
           text: text,
         }),
       });
-      alert("✅ Отчёт отправлен администратору");
+      setShowModal(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
     } catch (err) {
       console.error("Ошибка отправки:", err);
-      alert("Ошибка при отправке отчёта.");
+      alert("❌ Ошибка при отправке отчёта.");
     }
   };
 
@@ -329,6 +390,34 @@ Halyk терминал: ${halykFact} ₸
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideUp {
+          from { 
+            opacity: 0;
+            transform: translateY(40px) scale(0.96);
+          }
+          to { 
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+        @keyframes slideDown {
+          from {
+            opacity: 0;
+            transform: translate(-50%, -20px);
+          }
+          to {
+            opacity: 1;
+            transform: translate(-50%, 0);
+          }
+        }
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+        input[type="number"] {
+          -moz-appearance: textfield;
         }
       `}</style>
 
@@ -435,18 +524,16 @@ Halyk терминал: ${halykFact} ₸
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                     <div style={{ 
-                      width: '40px', 
-                      height: '40px', 
-                      background: 'linear-gradient(135deg, #f14635 0%, #d13427 100%)', 
+                      width: '48px', 
+                      height: '48px', 
+                      background: 'white', 
                       borderRadius: '10px', 
                       display: 'flex', 
                       alignItems: 'center', 
                       justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '20px',
-                      fontWeight: '700'
+                      padding: '8px'
                     }}>
-                      K
+                      <img src={kaspiLogo} alt="Kaspi" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
                     <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Kaspi QR
@@ -465,18 +552,16 @@ Halyk терминал: ${halykFact} ₸
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                     <div style={{ 
-                      width: '40px', 
-                      height: '40px', 
-                      background: 'linear-gradient(135deg, #00a651 0%, #008542 100%)', 
+                      width: '48px', 
+                      height: '48px', 
+                      background: 'white', 
                       borderRadius: '10px', 
                       display: 'flex', 
                       alignItems: 'center', 
                       justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '20px',
-                      fontWeight: '700'
+                      padding: '8px'
                     }}>
-                      H
+                      <img src={halykLogo} alt="Halyk" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
                     <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Halyk QR | Карта
@@ -495,18 +580,16 @@ Halyk терминал: ${halykFact} ₸
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                     <div style={{ 
-                      width: '40px', 
-                      height: '40px', 
-                      background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', 
+                      width: '48px', 
+                      height: '48px', 
+                      background: 'white', 
                       borderRadius: '10px', 
                       display: 'flex', 
                       alignItems: 'center', 
                       justifyContent: 'center',
-                      color: 'white'
+                      padding: '6px'
                     }}>
-                      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
+                      <img src={cashLogo} alt="Наличные" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                     </div>
                     <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
                       Наличные
@@ -520,23 +603,22 @@ Halyk терминал: ${halykFact} ₸
                 {mixed > 0 && (
                   <div style={{ 
                     padding: '24px', 
-                    background: '#f3e8ff', 
+                    background: '#fffbeb', 
                     borderRadius: '16px',
-                    border: '2px solid #e9d5ff'
+                    border: '2px solid #fcd34d'
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                       <div style={{ 
-                        width: '40px', 
-                        height: '40px', 
-                        background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)', 
+                        width: '48px', 
+                        height: '48px', 
+                        background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)', 
                         borderRadius: '10px', 
                         display: 'flex', 
                         alignItems: 'center', 
-                        justifyContent: 'center',
-                        color: 'white'
+                        justifyContent: 'center'
                       }}>
-                        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="white">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
                         </svg>
                       </div>
                       <p style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', letterSpacing: '0.5px' }}>
@@ -612,7 +694,7 @@ Halyk терминал: ${halykFact} ₸
             </button>
 
             <button
-              onClick={sendReport}
+              onClick={openSendModal}
               style={{
                 padding: '24px',
                 background: 'white',
@@ -656,6 +738,347 @@ Halyk терминал: ${halykFact} ₸
           </div>
         </div>
       </div>
+
+      {/* Модальное окно в стиле iPhone */}
+      {showModal && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '20px',
+            animation: 'fadeIn 0.2s ease'
+          }}
+          onClick={() => setShowModal(false)}
+        >
+          <div 
+            style={{
+              background: 'white',
+              borderRadius: '24px',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 30px 80px rgba(0, 0, 0, 0.3)',
+              animation: 'slideUp 0.3s ease',
+              overflow: 'hidden'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{
+              padding: '28px 24px 20px',
+              borderBottom: '1px solid #f0f0f0',
+              textAlign: 'center'
+            }}>
+              <h2 style={{
+                fontSize: '22px',
+                fontWeight: '600',
+                color: '#1a1a1a',
+                margin: 0
+              }}>
+                Отправить отчёт
+              </h2>
+              <p style={{
+                fontSize: '14px',
+                color: '#6b7280',
+                marginTop: '8px'
+              }}>
+                Введите фактические данные терминалов
+              </p>
+            </div>
+
+            <div style={{ padding: '24px' }}>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#6b7280',
+                  marginBottom: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Kaspi терминал (по факту)
+                </label>
+                <div style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <div style={{
+                    position: 'absolute',
+                    left: '16px',
+                    width: '28px',
+                    height: '28px',
+                    background: 'white',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '4px'
+                  }}>
+                    <img src={kaspiLogo} alt="Kaspi" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  </div>
+                  <input
+                    type="number"
+                    value={kaspiFact}
+                    onChange={(e) => setKaspiFact(e.target.value)}
+                    placeholder="Введите сумму"
+                    style={{
+                      width: '100%',
+                      padding: '16px 16px 16px 56px',
+                      fontSize: '16px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '14px',
+                      outline: 'none',
+                      transition: 'all 0.2s',
+                      fontWeight: '500'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#ef4444';
+                      e.target.style.boxShadow = '0 0 0 4px rgba(239, 68, 68, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  />
+                  <span style={{
+                    position: 'absolute',
+                    right: '16px',
+                    fontSize: '16px',
+                    color: '#6b7280',
+                    fontWeight: '600'
+                  }}>₸</span>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#6b7280',
+                  marginBottom: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Halyk терминал (по факту)
+                </label>
+                <div style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <div style={{
+                    position: 'absolute',
+                    left: '16px',
+                    width: '28px',
+                    height: '28px',
+                    background: 'white',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '4px'
+                  }}>
+                    <img src={halykLogo} alt="Halyk" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  </div>
+                  <input
+                    type="number"
+                    value={halykFact}
+                    onChange={(e) => setHalykFact(e.target.value)}
+                    placeholder="Введите сумму"
+                    style={{
+                      width: '100%',
+                      padding: '16px 16px 16px 56px',
+                      fontSize: '16px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '14px',
+                      outline: 'none',
+                      transition: 'all 0.2s',
+                      fontWeight: '500'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#10b981';
+                      e.target.style.boxShadow = '0 0 0 4px rgba(16, 185, 129, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  />
+                  <span style={{
+                    position: 'absolute',
+                    right: '16px',
+                    fontSize: '16px',
+                    color: '#6b7280',
+                    fontWeight: '600'
+                  }}>₸</span>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#6b7280',
+                  marginBottom: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Наличные в кассе (по факту)
+                </label>
+                <div style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}>
+                  <div style={{
+                    position: 'absolute',
+                    left: '16px',
+                    width: '28px',
+                    height: '28px',
+                    background: 'white',
+                    borderRadius: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '3px'
+                  }}>
+                    <img src={cashLogo} alt="Наличные" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  </div>
+                  <input
+                    type="number"
+                    value={cashFact}
+                    onChange={(e) => setCashFact(e.target.value)}
+                    placeholder="Введите сумму"
+                    style={{
+                      width: '100%',
+                      padding: '16px 16px 16px 56px',
+                      fontSize: '16px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '14px',
+                      outline: 'none',
+                      transition: 'all 0.2s',
+                      fontWeight: '500'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#f59e0b';
+                      e.target.style.boxShadow = '0 0 0 4px rgba(245, 158, 11, 0.1)';
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb';
+                      e.target.style.boxShadow = 'none';
+                    }}
+                  />
+                  <span style={{
+                    position: 'absolute',
+                    right: '16px',
+                    fontSize: '16px',
+                    color: '#6b7280',
+                    fontWeight: '600'
+                  }}>₸</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => setShowModal(false)}
+                  style={{
+                    flex: 1,
+                    padding: '16px',
+                    background: '#f3f4f6',
+                    color: '#1a1a1a',
+                    border: 'none',
+                    borderRadius: '14px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => e.target.style.background = '#e5e7eb'}
+                  onMouseOut={(e) => e.target.style.background = '#f3f4f6'}
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={sendReport}
+                  style={{
+                    flex: 1,
+                    padding: '16px',
+                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '14px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.transform = 'translateY(-2px)';
+                    e.target.style.boxShadow = '0 8px 20px rgba(16, 185, 129, 0.4)';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.transform = 'translateY(0)';
+                    e.target.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.3)';
+                  }}
+                >
+                  Отправить
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Уведомление об успешной отправке */}
+      {showSuccess && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '24px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            color: 'white',
+            padding: '20px 32px',
+            borderRadius: '16px',
+            boxShadow: '0 20px 60px rgba(16, 185, 129, 0.4)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            animation: 'slideDown 0.3s ease',
+            fontWeight: '600',
+            fontSize: '16px'
+          }}
+        >
+          <div style={{
+            width: '32px',
+            height: '32px',
+            background: 'rgba(255, 255, 255, 0.2)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="white">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          Отчёт успешно отправлен администратору!
+        </div>
+      )}
     </>
   );
 }
