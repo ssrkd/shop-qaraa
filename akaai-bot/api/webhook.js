@@ -111,17 +111,10 @@ module.exports = async (req, res) => {
         const sellerChatId = match[1];
         
         // Отправляем сообщение продавцу
-        await sendTelegramMessage(sellerChatId, 
-          `💬 <b>Ответ от владельца:</b>\n\n${text}`
-        );
+        await sendTelegramMessage(sellerChatId, text);
         
         // Сохраняем в базу
         await saveMessage(OWNER_CHAT_ID, 'owner', sellerChatId, text);
-        
-        // Подтверждение владельцу
-        await sendTelegramMessage(OWNER_CHAT_ID, 
-          `✅ Ответ отправлен продавцу!`
-        );
         
         return res.status(200).json({ ok: true });
       }
@@ -150,11 +143,6 @@ module.exports = async (req, res) => {
         `💬 ${text}\n\n` +
         `<i>chat_id: ${chatId}</i>\n\n` +
         `<i>Нажми "Ответить" чтобы ответить продавцу</i>`
-      );
-
-      // Подтверждение продавцу
-      await sendTelegramMessage(chatId,
-        `✅ Сообщение отправлено владельцу!`
       );
 
       return res.status(200).json({ ok: true });

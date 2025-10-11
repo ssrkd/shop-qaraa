@@ -17,8 +17,17 @@ export default function AkaAI({ user }) {
   const [showQuickButtons, setShowQuickButtons] = useState(false);
   const [chatMode, setChatMode] = useState('ai'); // 'ai' или 'messages'
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [telegramMessages, setTelegramMessages] = useState([]);
+  const [selectedSeller, setSelectedSeller] = useState(null);
+  const [sellers, setSellers] = useState([]);
+  const [messageInput, setMessageInput] = useState('');
+  const [isSendingTelegram, setIsSendingTelegram] = useState(false);
+  const [showChatIdModal, setShowChatIdModal] = useState(false);
+  const [selectedSellerForId, setSelectedSellerForId] = useState(null);
+  const [chatIdInput, setChatIdInput] = useState('');
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const messagesListRef = useRef(null);
 
   const GEMINI_API_KEY = 'AIzaSyBkpYrWRtYfSuCop83y14-q2sJrQ7NRfkQ';
   const TELEGRAM_BOT_TOKEN = '8363449094:AAHpdTNzz4mdtG49_2ldhx_uT3WTzeoz7xA';
@@ -58,6 +67,8 @@ export default function AkaAI({ user }) {
   useEffect(() => {
     if (user && userRole === 'owner') {
       loadChats();
+      loadSellers();
+      loadTelegramMessages();
     }
   }, [user, userRole]);
 
@@ -70,6 +81,46 @@ export default function AkaAI({ user }) {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (messagesListRef.current) {
+      messagesListRef.current.scrollTop = messagesListRef.current.scrollHeight;
+    }
+  }, [telegramMessages, selectedSeller]);
+
+  // Автообновление Telegram сообщений
+  useEffect(() => {
+    if (userRole !== 'owner') return;
+
+    // Обновление каждые 3 секунды (для надежности)
+    const interval = setInterval(() => {
+      loadTelegramMessages();
+    }, 3000);
+
+    // Realtime подписка на новые сообщения (INSTANT)
+    const subscription = supabase
+      .channel('telegram_messages_realtime')
+      .on('postgres_changes', 
+        { 
+          event: '*', // INSERT, UPDATE, DELETE
+          schema: 'public', 
+          table: 'telegram_messages' 
+        },
+        (payload) => {
+          console.log('📨 Realtime event:', payload);
+          // Моментальное обновление
+          loadTelegramMessages();
+        }
+      )
+      .subscribe((status) => {
+        console.log('📡 Realtime status:', status);
+      });
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(subscription);
+    };
+  }, [userRole]);
 
   // Обновляем текущую страницу при заходе
   useEffect(() => {
@@ -171,6 +222,112 @@ export default function AkaAI({ user }) {
       } else {
         await createNewChat();
       }
+    }
+  };
+
+  const loadSellers = async () => {
+    const { data, error } = await supabase
+      .from('login')
+      .select('id, username, fullname, telegram_chat_id')
+      .eq('role', 'seller');
+
+    if (!error && data) {
+      setSellers(data);
+    }
+  };
+
+  const loadTelegramMessages = async () => {
+    const { data, error } = await supabase
+      .from('telegram_messages')
+      .select('*')
+      .order('timestamp', { ascending: true });
+
+    if (!error && data) {
+      setTelegramMessages(data);
+      
+      // Подсчитываем непрочитанные сообщения (от продавцов к владельцу)
+      const unread = data.filter(msg => 
+        msg.to_user_id === '996317285' && !msg.read
+      ).length;
+      setUnreadMessages(unread);
+    }
+  };
+
+  const markMessagesAsRead = async (sellerChatId) => {
+    await supabase
+      .from('telegram_messages')
+      .update({ read: true })
+      .eq('from_user_id', sellerChatId)
+      .eq('to_user_id', '996317285')
+      .eq('read', false);
+
+    // Обновляем локальное состояние
+    await loadTelegramMessages();
+  };
+
+  const sendTelegramReply = async (sellerChatId, messageText) => {
+    try {
+      setIsSendingTelegram(true);
+
+      // Отправляем сообщение через Telegram Bot API
+      const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          chat_id: sellerChatId,
+          text: messageText,
+          parse_mode: 'HTML'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.ok) {
+        // Сохраняем в базу
+        await supabase.from('telegram_messages').insert([{
+          from_user_id: '996317285',
+          from_username: 'owner',
+          to_user_id: sellerChatId,
+          message: messageText,
+          read: true
+        }]);
+
+        // Обновляем сообщения
+        await loadTelegramMessages();
+        setMessageInput('');
+        
+        return { success: true };
+      } else {
+        return { success: false, error: data.description };
+      }
+    } catch (error) {
+      console.error('Telegram send error:', error);
+      return { success: false, error: error.message };
+    } finally {
+      setIsSendingTelegram(false);
+    }
+  };
+
+  const saveChatId = async (sellerId, chatId) => {
+    try {
+      const { error } = await supabase
+        .from('login')
+        .update({ telegram_chat_id: chatId })
+        .eq('id', sellerId);
+
+      if (!error) {
+        await loadSellers();
+        setShowChatIdModal(false);
+        setChatIdInput('');
+        setSelectedSellerForId(null);
+        alert('✅ Chat ID успешно сохранен!');
+      } else {
+        alert('❌ Ошибка сохранения: ' + error.message);
+      }
+    } catch (error) {
+      alert('❌ Ошибка: ' + error.message);
     }
   };
 
@@ -1597,49 +1754,364 @@ ${securityInfo}
             </>
             ) : (
               /* Режим сообщений с продавцами */
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                flexDirection: 'column',
-                gap: '16px'
-              }}>
+              <div style={{ display: 'flex', height: '100%', gap: '1px' }}>
+                {/* Список продавцов */}
                 <div style={{
-                  fontSize: '48px'
+                  width: '320px',
+                  background: 'rgba(255, 255, 255, 0.8)',
+                  backdropFilter: 'blur(40px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                  borderRight: '1px solid rgba(0, 0, 0, 0.06)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden'
                 }}>
-                  💬
+                  <div style={{
+                    padding: '16px 20px',
+                    borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                    fontSize: '17px',
+                    fontWeight: '600',
+                    color: '#1d1d1f'
+                  }}>
+                    Продавцы
+                  </div>
+                  
+                  <div style={{ flex: 1, overflowY: 'auto' }}>
+                    {sellers.map((seller) => {
+                      const hasTelegram = !!seller.telegram_chat_id;
+                      const sellerMessages = hasTelegram ? telegramMessages.filter(msg => {
+                        // Только сообщения МЕЖДУ этим продавцом и владельцем
+                        const isFromSeller = msg.from_user_id === seller.telegram_chat_id && msg.to_user_id === '996317285';
+                        const isToSeller = msg.from_user_id === '996317285' && msg.to_user_id === seller.telegram_chat_id;
+                        return isFromSeller || isToSeller;
+                      }) : [];
+                      const unreadCount = hasTelegram ? telegramMessages.filter(
+                        msg => msg.from_user_id === seller.telegram_chat_id && msg.to_user_id === '996317285' && !msg.read
+                      ).length : 0;
+                      const lastMessage = sellerMessages[sellerMessages.length - 1];
+
+                      return (
+                        <div
+                          key={seller.id}
+                          style={{
+                            padding: '16px 20px',
+                            borderBottom: '1px solid rgba(0, 0, 0, 0.04)',
+                            transition: 'all 0.2s ease',
+                            background: selectedSeller?.id === seller.id ? 'rgba(0, 122, 255, 0.08)' : 'transparent'
+                          }}
+                        >
+                          <div 
+                            onClick={() => {
+                              if (hasTelegram) {
+                                setSelectedSeller(seller);
+                                markMessagesAsRead(seller.telegram_chat_id);
+                              }
+                            }}
+                            style={{ 
+                              cursor: hasTelegram ? 'pointer' : 'default',
+                              opacity: hasTelegram ? 1 : 0.6
+                            }}
+                            onMouseOver={(e) => {
+                              if (hasTelegram && selectedSeller?.id !== seller.id) {
+                                e.currentTarget.parentElement.style.background = 'rgba(0, 0, 0, 0.02)';
+                              }
+                            }}
+                            onMouseOut={(e) => {
+                              if (hasTelegram && selectedSeller?.id !== seller.id) {
+                                e.currentTarget.parentElement.style.background = 'transparent';
+                              }
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                              <div style={{
+                                fontSize: '15px',
+                                fontWeight: '600',
+                                color: '#1d1d1f'
+                              }}>
+                                {seller.fullname}
+                              </div>
+                              {unreadCount > 0 && (
+                                <div style={{
+                                  width: '20px',
+                                  height: '20px',
+                                  background: '#007AFF',
+                                  borderRadius: '50%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  color: 'white'
+                                }}>
+                                  {unreadCount}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{
+                              fontSize: '13px',
+                              color: '#86868b',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              marginBottom: hasTelegram ? '0' : '8px'
+                            }}>
+                              @{seller.username}
+                              {lastMessage && ` · ${lastMessage.message.substring(0, 30)}...`}
+                            </div>
+                          </div>
+                          
+                          {!hasTelegram && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedSellerForId(seller);
+                                setShowChatIdModal(true);
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '8px 12px',
+                                background: 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontSize: '13px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s ease',
+                                marginTop: '8px'
+                              }}
+                              onMouseOver={(e) => {
+                                e.currentTarget.style.transform = 'scale(1.02)';
+                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 122, 255, 0.4)';
+                              }}
+                              onMouseOut={(e) => {
+                                e.currentTarget.style.transform = 'scale(1)';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }}
+                            >
+                              ➕ Добавить Chat ID
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    
+                    {sellers.length === 0 && (
+                      <div style={{
+                        padding: '40px 20px',
+                        textAlign: 'center',
+                        color: '#86868b',
+                        fontSize: '14px'
+                      }}>
+                        Нет продавцов
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div style={{
-                  fontSize: '20px',
-                  fontWeight: '600',
-                  color: '#1d1d1f'
-                }}>
-                  Сообщения с продавцами
-                </div>
-                <div style={{
-                  fontSize: '15px',
-                  color: '#86868b',
-                  textAlign: 'center',
-                  maxWidth: '400px',
-                  lineHeight: '1.5'
-                }}>
-                  Здесь будут отображаться сообщения от продавцов.{'\n'}
-                  Пока нет новых сообщений.
-                </div>
-                <div style={{
-                  marginTop: '16px',
-                  padding: '16px 24px',
-                  background: 'rgba(0, 122, 255, 0.1)',
-                  borderRadius: '16px',
-                  fontSize: '14px',
-                  color: '#007AFF',
-                  textAlign: 'center',
-                  lineHeight: '1.6'
-                }}>
-                  💡 Совет: Переключитесь на "AI Ассистент" чтобы{'\n'}
-                  отправить сообщение продавцу через команду:{'\n'}
-                  <strong>"отправь сообщение [username] [текст]"</strong>
+
+                {/* Окно чата */}
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f7' }}>
+                  {selectedSeller ? (
+                    <>
+                      {/* Шапка чата */}
+                      <div style={{
+                        padding: '16px 24px',
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        backdropFilter: 'blur(40px)',
+                        borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px'
+                      }}>
+                        <div style={{
+                          width: '40px',
+                          height: '40px',
+                          background: 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)',
+                          borderRadius: '50%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '18px',
+                          fontWeight: '600',
+                          color: 'white'
+                        }}>
+                          {selectedSeller.fullname.charAt(0)}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '16px', fontWeight: '600', color: '#1d1d1f' }}>
+                            {selectedSeller.fullname}
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#86868b' }}>
+                            @{selectedSeller.username}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Сообщения */}
+                      <div
+                        ref={messagesListRef}
+                        style={{
+                          flex: 1,
+                          overflowY: 'auto',
+                          padding: '24px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '12px'
+                        }}
+                      >
+                        {telegramMessages
+                          .filter(msg => {
+                            // Сообщение от продавца владельцу
+                            const isFromSeller = msg.from_user_id === selectedSeller.telegram_chat_id && msg.to_user_id === '996317285';
+                            // Сообщение от владельца продавцу
+                            const isToSeller = msg.from_user_id === '996317285' && msg.to_user_id === selectedSeller.telegram_chat_id;
+                            return isFromSeller || isToSeller;
+                          })
+                          .map((msg, index) => {
+                            const isFromOwner = msg.from_user_id === '996317285';
+                            return (
+                              <div
+                                key={index}
+                                style={{
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  alignItems: isFromOwner ? 'flex-end' : 'flex-start'
+                                }}
+                              >
+                                <div style={{
+                                  maxWidth: '70%',
+                                  padding: '12px 16px',
+                                  background: isFromOwner 
+                                    ? 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)'
+                                    : 'white',
+                                  color: isFromOwner ? 'white' : '#1d1d1f',
+                                  borderRadius: isFromOwner 
+                                    ? '20px 20px 4px 20px'
+                                    : '20px 20px 20px 4px',
+                                  fontSize: '15px',
+                                  lineHeight: '1.5',
+                                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                                  wordWrap: 'break-word'
+                                }}>
+                                  {msg.message}
+                                </div>
+                                <div style={{
+                                  fontSize: '12px',
+                                  color: '#86868b',
+                                  marginTop: '4px'
+                                }}>
+                                  {new Date(msg.timestamp).toLocaleString('ru-RU', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+
+                      {/* Поле ввода */}
+                      <div style={{
+                        padding: '16px 24px',
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        backdropFilter: 'blur(40px)',
+                        borderTop: '1px solid rgba(0, 0, 0, 0.06)',
+                        display: 'flex',
+                        gap: '12px',
+                        alignItems: 'center'
+                      }}>
+                        <input
+                          type="text"
+                          value={messageInput}
+                          onChange={(e) => setMessageInput(e.target.value)}
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter' && messageInput.trim() && !isSendingTelegram) {
+                              sendTelegramReply(selectedSeller.telegram_chat_id, messageInput);
+                            }
+                          }}
+                          placeholder="Сообщение..."
+                          disabled={isSendingTelegram}
+                          style={{
+                            flex: 1,
+                            padding: '12px 16px',
+                            background: 'white',
+                            border: '1px solid rgba(0, 0, 0, 0.1)',
+                            borderRadius: '24px',
+                            fontSize: '15px',
+                            outline: 'none',
+                            fontFamily: 'inherit',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onFocus={(e) => {
+                            e.currentTarget.style.borderColor = '#007AFF';
+                            e.currentTarget.style.boxShadow = '0 0 0 4px rgba(0, 122, 255, 0.1)';
+                          }}
+                          onBlur={(e) => {
+                            e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                            e.currentTarget.style.boxShadow = 'none';
+                          }}
+                        />
+                        <button
+                          onClick={() => sendTelegramReply(selectedSeller.telegram_chat_id, messageInput)}
+                          disabled={!messageInput.trim() || isSendingTelegram}
+                          style={{
+                            width: '44px',
+                            height: '44px',
+                            background: messageInput.trim() && !isSendingTelegram 
+                              ? 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)'
+                              : 'rgba(0, 0, 0, 0.1)',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '50%',
+                            cursor: messageInput.trim() && !isSendingTelegram ? 'pointer' : 'not-allowed',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            transition: 'all 0.2s ease',
+                            boxShadow: messageInput.trim() && !isSendingTelegram 
+                              ? '0 2px 8px rgba(0, 122, 255, 0.3)'
+                              : 'none'
+                          }}
+                          onMouseOver={(e) => {
+                            if (messageInput.trim() && !isSendingTelegram) {
+                              e.currentTarget.style.transform = 'scale(1.05)';
+                            }
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                        >
+                          {isSendingTelegram ? (
+                            <div style={{ fontSize: '18px' }}>⏳</div>
+                          ) : (
+                            <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                              <path d="M14 2L7 9M14 2L9.5 14L7 9M14 2L2 6.5L7 9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          )}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    /* Нет выбранного продавца */
+                    <div style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexDirection: 'column',
+                      gap: '16px'
+                    }}>
+                      <div style={{ fontSize: '48px' }}>💬</div>
+                      <div style={{ fontSize: '17px', fontWeight: '600', color: '#1d1d1f' }}>
+                        Выберите продавца
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#86868b', textAlign: 'center', maxWidth: '300px' }}>
+                        Выберите продавца из списка слева, чтобы начать общение
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1917,7 +2389,188 @@ ${securityInfo}
         </div>
       </div>
 
+      {/* Модальное окно для Chat ID */}
+      {showChatIdModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '20px',
+            padding: '32px',
+            maxWidth: '400px',
+            width: '90%',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            animation: 'scaleIn 0.3s ease'
+          }}>
+            <div style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#1d1d1f',
+              marginBottom: '8px'
+            }}>
+              Добавить Chat ID
+            </div>
+            <div style={{
+              fontSize: '14px',
+              color: '#86868b',
+              marginBottom: '24px'
+            }}>
+              Для {selectedSellerForId?.fullname} (@{selectedSellerForId?.username})
+            </div>
+            
+            <div style={{
+              marginBottom: '20px'
+            }}>
+              <label style={{
+                display: 'block',
+                fontSize: '13px',
+                fontWeight: '600',
+                color: '#1d1d1f',
+                marginBottom: '8px'
+              }}>
+                Telegram Chat ID
+              </label>
+              <input
+                type="text"
+                value={chatIdInput}
+                onChange={(e) => setChatIdInput(e.target.value)}
+                placeholder="Например: 996317285"
+                autoFocus
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  border: '1px solid rgba(0, 0, 0, 0.1)',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontFamily: 'inherit',
+                  outline: 'none',
+                  transition: 'all 0.2s ease',
+                  boxSizing: 'border-box'
+                }}
+                onFocus={(e) => {
+                  e.currentTarget.style.borderColor = '#007AFF';
+                  e.currentTarget.style.boxShadow = '0 0 0 4px rgba(0, 122, 255, 0.1)';
+                }}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && chatIdInput.trim()) {
+                    saveChatId(selectedSellerForId.id, chatIdInput.trim());
+                  }
+                }}
+              />
+              <div style={{
+                fontSize: '12px',
+                color: '#86868b',
+                marginTop: '8px',
+                lineHeight: '1.4'
+              }}>
+                💡 Попросите продавца написать /start боту @akaAssistant_bot, чтобы получить его chat_id
+              </div>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              gap: '12px'
+            }}>
+              <button
+                onClick={() => {
+                  setShowChatIdModal(false);
+                  setChatIdInput('');
+                  setSelectedSellerForId(null);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: 'rgba(0, 0, 0, 0.05)',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  color: '#1d1d1f',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.1)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={() => {
+                  if (chatIdInput.trim()) {
+                    saveChatId(selectedSellerForId.id, chatIdInput.trim());
+                  }
+                }}
+                disabled={!chatIdInput.trim()}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  background: chatIdInput.trim() 
+                    ? 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)'
+                    : 'rgba(0, 0, 0, 0.1)',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  color: 'white',
+                  cursor: chatIdInput.trim() ? 'pointer' : 'not-allowed',
+                  transition: 'all 0.2s ease',
+                  boxShadow: chatIdInput.trim() 
+                    ? '0 4px 12px rgba(0, 122, 255, 0.3)'
+                    : 'none'
+                }}
+                onMouseOver={(e) => {
+                  if (chatIdInput.trim()) {
+                    e.currentTarget.style.transform = 'scale(1.02)';
+                  }
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                }}
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes scaleIn {
+          from {
+            opacity: 0;
+            transform: scale(0.9);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+
         @keyframes slideIn {
           from {
             opacity: 0;
