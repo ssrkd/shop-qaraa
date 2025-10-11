@@ -25,6 +25,8 @@ export default function AkaAI({ user }) {
   const [showChatIdModal, setShowChatIdModal] = useState(false);
   const [selectedSellerForId, setSelectedSellerForId] = useState(null);
   const [chatIdInput, setChatIdInput] = useState('');
+  const [showClearChatModal, setShowClearChatModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const messagesListRef = useRef(null);
@@ -243,10 +245,12 @@ export default function AkaAI({ user }) {
       .order('timestamp', { ascending: true });
 
     if (!error && data) {
-      setTelegramMessages(data);
+      // Фильтруем сообщения, которые не удалены владельцем
+      const filteredMessages = data.filter(msg => !msg.deleted_by_owner);
+      setTelegramMessages(filteredMessages);
       
       // Подсчитываем непрочитанные сообщения (от продавцов к владельцу)
-      const unread = data.filter(msg => 
+      const unread = filteredMessages.filter(msg => 
         msg.to_user_id === '996317285' && !msg.read
       ).length;
       setUnreadMessages(unread);
@@ -268,6 +272,11 @@ export default function AkaAI({ user }) {
   const sendTelegramReply = async (sellerChatId, messageText) => {
     try {
       setIsSendingTelegram(true);
+      
+      console.log('📤 Отправка сообщения:', {
+        chatId: sellerChatId,
+        text: messageText
+      });
 
       // Отправляем сообщение через Telegram Bot API
       const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -283,6 +292,7 @@ export default function AkaAI({ user }) {
       });
 
       const data = await response.json();
+      console.log('📥 Ответ Telegram:', data);
 
       if (data.ok) {
         // Сохраняем в базу
@@ -291,7 +301,9 @@ export default function AkaAI({ user }) {
           from_username: 'owner',
           to_user_id: sellerChatId,
           message: messageText,
-          read: true
+          read: true,
+          deleted_by_owner: false,
+          deleted_by_seller: false
         }]);
 
         // Обновляем сообщения
@@ -300,10 +312,13 @@ export default function AkaAI({ user }) {
         
         return { success: true };
       } else {
+        console.error('❌ Ошибка Telegram:', data);
+        alert(`❌ Ошибка отправки: ${data.description}\n\nЧат ID: ${sellerChatId}\nПопросите продавца написать /start боту @akaAssistant_bot`);
         return { success: false, error: data.description };
       }
     } catch (error) {
       console.error('Telegram send error:', error);
+      alert(`❌ Ошибка: ${error.message}`);
       return { success: false, error: error.message };
     } finally {
       setIsSendingTelegram(false);
@@ -312,21 +327,73 @@ export default function AkaAI({ user }) {
 
   const saveChatId = async (sellerId, chatId) => {
     try {
+      console.log('💾 Сохранение chat_id:', { sellerId, chatId });
+      
       const { error } = await supabase
         .from('login')
         .update({ telegram_chat_id: chatId })
         .eq('id', sellerId);
 
       if (!error) {
+        // Перезагружаем продавцов
         await loadSellers();
+        
+        // Обновляем локальное состояние мгновенно
+        setSellers(prev => prev.map(s => 
+          s.id === sellerId ? { ...s, telegram_chat_id: chatId } : s
+        ));
+        
         setShowChatIdModal(false);
         setChatIdInput('');
         setSelectedSellerForId(null);
-        alert('✅ Chat ID успешно сохранен!');
+        alert('✅ Chat ID успешно сохранен!\n\nТеперь можно писать этому продавцу.');
       } else {
+        console.error('❌ Ошибка сохранения:', error);
         alert('❌ Ошибка сохранения: ' + error.message);
       }
     } catch (error) {
+      console.error('❌ Ошибка:', error);
+      alert('❌ Ошибка: ' + error.message);
+    }
+  };
+
+  const clearChat = async () => {
+    if (!selectedSeller) return;
+    
+    try {
+      // Получаем все сообщения этого чата
+      const { data: chatMessages } = await supabase
+        .from('telegram_messages')
+        .select('id')
+        .or(`and(from_user_id.eq.${selectedSeller.telegram_chat_id},to_user_id.eq.996317285),and(from_user_id.eq.996317285,to_user_id.eq.${selectedSeller.telegram_chat_id})`);
+
+      if (chatMessages && chatMessages.length > 0) {
+        const ids = chatMessages.map(msg => msg.id);
+        
+        // Помечаем все сообщения как удаленные для владельца
+        const { error } = await supabase
+          .from('telegram_messages')
+          .update({ deleted_by_owner: true })
+          .in('id', ids);
+
+        if (!error) {
+          // Обновляем локальное состояние МГНОВЕННО
+          setTelegramMessages(prev => 
+            prev.filter(msg => !ids.includes(msg.id))
+          );
+          setShowClearChatModal(false);
+          
+          // Перезагружаем для синхронизации
+          await loadTelegramMessages();
+        } else {
+          console.error('Ошибка удаления:', error);
+          alert('❌ Ошибка при очистке чата');
+        }
+      } else {
+        setShowClearChatModal(false);
+      }
+    } catch (error) {
+      console.error('Ошибка:', error);
       alert('❌ Ошибка: ' + error.message);
     }
   };
@@ -1511,7 +1578,7 @@ ${securityInfo}
         )}
 
         {/* Main Chat Area */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* Header */}
           <div style={{
             padding: '20px 24px',
@@ -1522,7 +1589,8 @@ ${securityInfo}
             display: 'flex',
             alignItems: 'center',
             gap: '16px',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)'
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
+            flexShrink: 0
           }}>
             {!showSidebar && (
               <button
@@ -1861,36 +1929,64 @@ ${securityInfo}
                           </div>
                           
                           {!hasTelegram && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedSellerForId(seller);
-                                setShowChatIdModal(true);
-                              }}
-                              style={{
-                                width: '100%',
-                                padding: '8px 12px',
-                                background: 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '8px',
-                                fontSize: '13px',
-                                fontWeight: '600',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                                marginTop: '8px'
-                              }}
-                              onMouseOver={(e) => {
-                                e.currentTarget.style.transform = 'scale(1.02)';
-                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 122, 255, 0.4)';
-                              }}
-                              onMouseOut={(e) => {
-                                e.currentTarget.style.transform = 'scale(1)';
-                                e.currentTarget.style.boxShadow = 'none';
-                              }}
-                            >
-                              ➕ Добавить Chat ID
-                            </button>
+                            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedSellerForId(seller);
+                                  setShowInviteModal(true);
+                                }}
+                                style={{
+                                  flex: 1,
+                                  padding: '8px 12px',
+                                  background: 'linear-gradient(135deg, #34C759 0%, #28A745 100%)',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '8px',
+                                  fontSize: '13px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1.02)';
+                                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(52, 199, 89, 0.4)';
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                  e.currentTarget.style.boxShadow = 'none';
+                                }}
+                              >
+                                📱 Пригласить в бот
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedSellerForId(seller);
+                                  setShowChatIdModal(true);
+                                }}
+                                style={{
+                                  padding: '8px 12px',
+                                  background: 'rgba(0, 122, 255, 0.1)',
+                                  color: '#007AFF',
+                                  border: '1px solid rgba(0, 122, 255, 0.2)',
+                                  borderRadius: '8px',
+                                  fontSize: '13px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s ease',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.background = 'rgba(0, 122, 255, 0.2)';
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.background = 'rgba(0, 122, 255, 0.1)';
+                                }}
+                              >
+                                ID вручную
+                              </button>
+                            </div>
                           )}
                         </div>
                       );
@@ -1910,7 +2006,7 @@ ${securityInfo}
                 </div>
 
                 {/* Окно чата */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f7' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f5f5f7', overflow: 'hidden' }}>
                   {selectedSeller ? (
                     <>
                       {/* Шапка чата */}
@@ -1921,7 +2017,8 @@ ${securityInfo}
                         borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '12px'
+                        gap: '12px',
+                        flexShrink: 0
                       }}>
                         <div style={{
                           width: '40px',
@@ -1945,6 +2042,30 @@ ${securityInfo}
                             @{selectedSeller.username}
                           </div>
                         </div>
+                        <button
+                          onClick={() => setShowClearChatModal(true)}
+                          style={{
+                            padding: '10px',
+                            background: 'transparent',
+                            border: 'none',
+                            borderRadius: '10px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.background = 'rgba(255, 59, 48, 0.1)';
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                          }}
+                        >
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" stroke="#FF3B30" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
                       </div>
 
                       {/* Сообщения */}
@@ -2020,7 +2141,8 @@ ${securityInfo}
                         borderTop: '1px solid rgba(0, 0, 0, 0.06)',
                         display: 'flex',
                         gap: '12px',
-                        alignItems: 'center'
+                        alignItems: 'center',
+                        flexShrink: 0
                       }}>
                         <input
                           type="text"
@@ -2123,7 +2245,8 @@ ${securityInfo}
             background: 'rgba(255, 255, 255, 0.8)',
             backdropFilter: 'blur(40px) saturate(180%)',
             WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-            borderTop: '1px solid rgba(0, 0, 0, 0.06)'
+            borderTop: '1px solid rgba(0, 0, 0, 0.06)',
+            flexShrink: 0
           }}>
             {/* Кнопка toggle для Quick Buttons - только в режиме AI */}
             {chatMode === 'ai' && (
@@ -2548,6 +2671,272 @@ ${securityInfo}
                 }}
               >
                 Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно приглашения в бот */}
+      {showInviteModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '20px',
+            padding: '32px',
+            maxWidth: '480px',
+            width: '90%',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            animation: 'scaleIn 0.3s ease'
+          }}>
+            <div style={{
+              fontSize: '48px',
+              textAlign: 'center',
+              marginBottom: '16px'
+            }}>
+              📱
+            </div>
+            <div style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#1d1d1f',
+              marginBottom: '12px',
+              textAlign: 'center'
+            }}>
+              Пригласить продавца в бот
+            </div>
+            <div style={{
+              fontSize: '14px',
+              color: '#86868b',
+              marginBottom: '24px',
+              textAlign: 'center',
+              lineHeight: '1.5'
+            }}>
+              {selectedSellerForId?.fullname} (@{selectedSellerForId?.username}) должен написать боту, чтобы вы могли ему отправлять сообщения
+            </div>
+
+            <div style={{
+              background: 'rgba(0, 122, 255, 0.05)',
+              border: '1px solid rgba(0, 122, 255, 0.15)',
+              borderRadius: '16px',
+              padding: '20px',
+              marginBottom: '24px'
+            }}>
+              <div style={{
+                fontSize: '13px',
+                fontWeight: '600',
+                color: '#007AFF',
+                marginBottom: '12px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}>
+                📋 Инструкция для продавца:
+              </div>
+              <div style={{
+                fontSize: '14px',
+                color: '#1d1d1f',
+                lineHeight: '1.8'
+              }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>1.</strong> Открой Telegram
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>2.</strong> Найди бота <strong>@akaAssistant_bot</strong>
+                </div>
+                <div style={{ marginBottom: '8px' }}>
+                  <strong>3.</strong> Нажми <strong>START</strong> или напиши <code style={{ 
+                    background: 'rgba(0, 0, 0, 0.06)', 
+                    padding: '2px 6px', 
+                    borderRadius: '4px',
+                    fontFamily: 'monospace'
+                  }}>/start</code>
+                </div>
+                <div>
+                  <strong>4.</strong> Готово! Теперь я смогу писать тебе.
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText('https://t.me/akaAssistant_bot');
+                const btn = document.activeElement;
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Ссылка скопирована!';
+                setTimeout(() => {
+                  btn.textContent = originalText;
+                }, 2000);
+              }}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'linear-gradient(135deg, #007AFF 0%, #0051D5 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                marginBottom: '12px',
+                boxShadow: '0 4px 12px rgba(0, 122, 255, 0.3)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.transform = 'scale(1.02)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              📋 Скопировать ссылку на бота
+            </button>
+
+            <button
+              onClick={() => {
+                setShowInviteModal(false);
+                setSelectedSellerForId(null);
+              }}
+              style={{
+                width: '100%',
+                padding: '14px',
+                background: 'rgba(0, 0, 0, 0.05)',
+                border: 'none',
+                borderRadius: '12px',
+                fontSize: '15px',
+                fontWeight: '600',
+                color: '#1d1d1f',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.1)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
+              }}
+            >
+              Закрыть
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Модальное окно подтверждения очистки чата */}
+      {showClearChatModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '20px',
+            padding: '32px',
+            maxWidth: '380px',
+            width: '90%',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            animation: 'scaleIn 0.3s ease'
+          }}>
+            <div style={{
+              fontSize: '48px',
+              textAlign: 'center',
+              marginBottom: '16px'
+            }}>
+              🗑️
+            </div>
+            <div style={{
+              fontSize: '20px',
+              fontWeight: '600',
+              color: '#1d1d1f',
+              marginBottom: '12px',
+              textAlign: 'center'
+            }}>
+              Очистить чат?
+            </div>
+            <div style={{
+              fontSize: '14px',
+              color: '#86868b',
+              marginBottom: '28px',
+              textAlign: 'center',
+              lineHeight: '1.5'
+            }}>
+              Вся история переписки с {selectedSeller?.fullname} будет удалена <strong>только у вас</strong>. У продавца сообщения останутся.
+            </div>
+
+            <div style={{
+              display: 'flex',
+              gap: '12px'
+            }}>
+              <button
+                onClick={() => setShowClearChatModal(false)}
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  background: 'rgba(0, 0, 0, 0.05)',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  color: '#1d1d1f',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.1)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={clearChat}
+                style={{
+                  flex: 1,
+                  padding: '14px',
+                  background: 'linear-gradient(135deg, #FF3B30 0%, #D32F2F 100%)',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  color: 'white',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(255, 59, 48, 0.3)'
+                }}
+                onMouseOver={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.02)';
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(255, 59, 48, 0.4)';
+                }}
+                onMouseOut={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(255, 59, 48, 0.3)';
+                }}
+              >
+                Очистить
               </button>
             </div>
           </div>

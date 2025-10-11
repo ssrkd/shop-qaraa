@@ -1581,7 +1581,7 @@ export default function Dashboard({ user, onLogout }) {
               marginTop: '32px'
             }}>
               © qaraa.crm | powered by aka. Система безопасного доступа, 2025.<br />
-              Последнее обновление: 11.10.2025 | srk.
+              Последнее обновление: 12.10.2025 | srk.
             </footer>
           </div>
         </div>
