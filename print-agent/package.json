@@ -1,0 +1,20 @@
+{
+  "name": "qaraa-print-agent",
+  "version": "1.0.0",
+  "description": "Print Agent для Xprinter XP-365B - проверяет очередь Supabase и печатает",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "dev": "nodemon agent.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": ["print", "queue", "cups", "xprinter"],
+  "author": "qaraa.kz",
+  "license": "MIT"
+}
+

@@ -5,6 +5,9 @@ import kaspiLogo from '../images/kaspi.svg';
 import halykLogo from '../images/halyk.svg';
 import cashLogo from '../images/cash.png';
 
+// 🖨️ URL Print Server через Cloudflare Tunnel
+const PRINT_SERVER_URL = 'https://acoustic-organizational-fraser-sat.trycloudflare.com/api/print';
+
 export default function NewSale({ user, onBack }) {
   const navigate = useNavigate();
   const [barcode, setBarcode] = useState('');
@@ -23,6 +26,10 @@ export default function NewSale({ user, onBack }) {
   const [cart, setCart] = useState([]);
   const [mixedCashAmount, setMixedCashAmount] = useState('');
   const [mixedSecondMethod, setMixedSecondMethod] = useState('');
+  const [showPrintLoading, setShowPrintLoading] = useState(false);
+  const [showPrintSuccess, setShowPrintSuccess] = useState(false);
+  const [showPrintError, setShowPrintError] = useState(false);
+  const [printErrorMessage, setPrintErrorMessage] = useState('');
 
   const localDate = new Date();
   const offsetMs = localDate.getTimezoneOffset() * 60 * 1000;
@@ -126,6 +133,55 @@ export default function NewSale({ user, onBack }) {
     );
     setSize('');
     setPrice('');
+  };
+
+  // 🖨️ Функция печати чека
+  const printReceipt = async (cartItems, paymentMethod, total, change, given) => {
+    setShowPrintLoading(true);
+    
+    try {
+      const response = await fetch(PRINT_SERVER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'receipt',
+          seller: user.fullname,
+          items: cartItems.map(item => ({
+            productName: item.productName,
+            size: item.size,
+            quantity: item.quantity,
+            price: parseFloat(item.price)
+          })),
+          total: parseFloat(total),
+          change: change !== null ? parseFloat(change) : null,
+          given: given ? parseFloat(given) : null,
+          method: paymentMethod
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Чек отправлен на печать!');
+        setShowPrintLoading(false);
+        setShowPrintSuccess(true);
+        setTimeout(() => setShowPrintSuccess(false), 2000);
+      } else {
+        console.error('❌ Ошибка печати:', result.message);
+        setShowPrintLoading(false);
+        setPrintErrorMessage('Ошибка печати чека');
+        setShowPrintError(true);
+        setTimeout(() => setShowPrintError(false), 3000);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка отправки на печать:', error);
+      setShowPrintLoading(false);
+      setPrintErrorMessage('Не удалось отправить чек на печать');
+      setShowPrintError(true);
+      setTimeout(() => setShowPrintError(false), 3000);
+    }
   };
 
   const handleSizeChange = (selectedSize) => {
@@ -256,6 +312,9 @@ export default function NewSale({ user, onBack }) {
     try {
       setIsLoading(true);
 
+      // Вычисляем сдачу ДО вставки
+      const change = paymentMethod === 'cash' ? Number(givenAmount) - totalAmount : 0;
+
       const inserts = cart.map((item) => ({
         seller_id: user.fullname,
         product: item.productName,
@@ -263,18 +322,25 @@ export default function NewSale({ user, onBack }) {
         size: item.size,
         quantity: Number(item.quantity),
         price: Number(item.price),
+        change_amount: change,
         created_at: localISO,
       }));
 
+      console.log('📦 Отправляем данные в sales:', inserts);
+      
       const { data: insertedSales, error: salesError } = await supabase
         .from('sales')
         .insert(inserts)
         .select('id');
 
-      if (salesError) throw salesError;
+      console.log('✅ Результат вставки:', { insertedSales, salesError });
+      
+      if (salesError) {
+        console.error('❌ ОШИБКА ВСТАВКИ В SALES:', salesError);
+        throw salesError;
+      }
 
       const saleIds = insertedSales.map((s) => s.id);
-      const change = paymentMethod === 'cash' ? Number(givenAmount) - totalAmount : null;
 
       const methodMapping = {
         cash: 'Наличные',
@@ -325,6 +391,14 @@ if (updateError) throw updateError;
           ? `Продажа успешно проведена! Наличные: ${Number(mixedCashAmount).toFixed(2)} ₸, ${methodMapping[mixedSecondMethod]}: ${(totalAmount - Number(mixedCashAmount)).toFixed(2)} ₸`
           : 'Продажа успешно проведена!'
       );
+      
+      // Автоматически скрываем сообщение через 3 секунды
+      setTimeout(() => setSuccess(''), 3000);
+
+      // 🖨️ АВТОМАТИЧЕСКАЯ ПЕЧАТЬ ЧЕКА
+      const givenAmountForPrint = paymentMethod === 'cash' ? Number(givenAmount) : null;
+      printReceipt(cart, finalPaymentMethod, totalAmount, change, givenAmountForPrint);
+
       setCart([]);
       setShowPayment(false);
       setMethod('');
@@ -333,7 +407,9 @@ if (updateError) throw updateError;
       setMixedSecondMethod('');
       setError('');
     } catch (err) {
-      console.error('Ошибка при оплате:', err.message);
+      console.error('❌ ПОЛНАЯ ОШИБКА:', err);
+      console.error('❌ Сообщение:', err.message);
+      console.error('❌ Детали:', JSON.stringify(err, null, 2));
       setError('Ошибка при оплате: ' + err.message);
     } finally {
       setIsLoading(false);
@@ -352,6 +428,10 @@ if (updateError) throw updateError;
         @keyframes slideIn {
           from { opacity: 0; transform: scale(0.95); }
           to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
       `}</style>
 
@@ -1544,6 +1624,137 @@ if (updateError) throw updateError;
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🖨️ Модальные окна печати в стиле iPhone */}
+      {showPrintLoading && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.95)',
+            borderRadius: '20px',
+            padding: '40px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            textAlign: 'center',
+            backdropFilter: 'blur(20px)',
+            animation: 'slideIn 0.3s ease'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              border: '4px solid #e5e7eb',
+              borderTopColor: '#1a1a1a',
+              borderRadius: '50%',
+              margin: '0 auto 20px',
+              animation: 'spin 1s linear infinite'
+            }}></div>
+            <div style={{ fontSize: '18px', fontWeight: '600', color: '#1a1a1a' }}>
+              Подготовка к печати...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPrintSuccess && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.95)',
+            borderRadius: '20px',
+            padding: '40px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            textAlign: 'center',
+            backdropFilter: 'blur(20px)',
+            animation: 'slideIn 0.3s ease'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              borderRadius: '50%',
+              margin: '0 auto 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth="3">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: '600', color: '#1a1a1a' }}>
+              Чек отправлен на печать!
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPrintError && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          animation: 'fadeIn 0.2s ease'
+        }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.95)',
+            borderRadius: '20px',
+            padding: '40px',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            textAlign: 'center',
+            backdropFilter: 'blur(20px)',
+            animation: 'slideIn 0.3s ease'
+          }}>
+            <div style={{
+              width: '60px',
+              height: '60px',
+              background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+              borderRadius: '50%',
+              margin: '0 auto 20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="white" strokeWidth="3">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <div style={{ fontSize: '18px', fontWeight: '600', color: '#1a1a1a', marginBottom: '8px' }}>
+              Ошибка печати
+            </div>
+            <div style={{ fontSize: '14px', color: '#6b7280' }}>
+              {printErrorMessage}
             </div>
           </div>
         </div>

@@ -5,6 +5,9 @@ import kaspiLogo from '../images/kaspi.svg';
 import halykLogo from '../images/halyk.svg';
 import cashLogo from '../images/cash.png';
 
+// 🖨️ URL Print Server через Cloudflare Tunnel
+const PRINT_SERVER_URL = 'https://acoustic-organizational-fraser-sat.trycloudflare.com/api/print';
+
 export default function AnalitikaHistory({ user }) {
   const navigate = useNavigate();
   const [kaspi, setKaspi] = useState(0);
@@ -17,6 +20,10 @@ export default function AnalitikaHistory({ user }) {
   const [halykFact, setHalykFact] = useState('');
   const [cashFact, setCashFact] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showPrintLoading, setShowPrintLoading] = useState(false);
+  const [showPrintSuccess, setShowPrintSuccess] = useState(false);
+  const [showPrintError, setShowPrintError] = useState(false);
+  const [printErrorMessage, setPrintErrorMessage] = useState('');
 
   const BOT_TOKEN = "8458767187:AAHV6sl14LzVt1Bnk49LvoR6QYg7MAvbYhA";
   const ADMIN_ID = "996317285";
@@ -77,6 +84,7 @@ export default function AnalitikaHistory({ user }) {
       const methodLower = method.toLowerCase();
       
       if (methodLower.includes("смешанная")) {
+        // При смешанной оплате разбиваем на части
         const cashMatch = method.match(/Наличные:\s*([\d.]+)\s*₸/i);
         const kaspiMatch = method.match(/Kaspi QR:\s*([\d.]+)\s*₸/i);
         const halykMatch = method.match(/Halyk QR \| Карта:\s*([\d.]+)\s*₸/i);
@@ -85,7 +93,8 @@ export default function AnalitikaHistory({ user }) {
         if (kaspiMatch) kaspiSum += parseFloat(kaspiMatch[1]);
         if (halykMatch) halykSum += parseFloat(halykMatch[1]);
         
-        mixedSum += parseFloat(s.price) * (s.quantity || 1);
+        // УБРАЛИ ДВОЙНОЙ ПОДСЧЕТ! Теперь смешанная НЕ добавляется отдельно
+        // mixedSum += parseFloat(s.price) * (s.quantity || 1);
       } else if (methodLower.includes("kaspi")) {
         kaspiSum += parseFloat(s.price) * (s.quantity || 1);
       } else if (methodLower.includes("halyk") || methodLower.includes("карта")) {
@@ -102,205 +111,52 @@ export default function AnalitikaHistory({ user }) {
     setLoading(false);
   };
 
-  const total = kaspi + halyk + cash;
+  const total = kaspi + halyk + cash; // mixed убран - теперь суммы разбиты по категориям
 
-  const printReport = () => {
-    const now = new Date().toLocaleString("ru-RU", {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-    const printWindow = window.open("", "_blank");
-    printWindow.document.write(`
-      <html>
-        <head>
-          <meta charset="UTF-8" />
-          <title>Отчёт за день</title>
-          <style>
-            @page {
-              size: 58mm auto;
-              margin: 0;
-            }
-            * { 
-              margin: 0; 
-              padding: 0; 
-              box-sizing: border-box; 
-            }
-            body {
-              width: 58mm;
-              font-family: 'Courier New', monospace;
-              padding: 3mm 3mm 2mm 3mm;
-              margin: 0;
-              background: white;
-              font-size: 11px;
-              line-height: 1.3;
-            }
-            .header {
-              text-align: center;
-              padding-bottom: 2mm;
-              margin-bottom: 2mm;
-              border-bottom: 2px solid #000;
-            }
-            .logo {
-              font-size: 22px;
-              font-weight: 700;
-              color: #000;
-              margin-bottom: 1mm;
-              letter-spacing: -1px;
-            }
-            .subtitle {
-              font-size: 10px;
-              color: #000;
-              font-weight: 600;
-              text-transform: uppercase;
-            }
-            .divider {
-              border-top: 1px dashed #000;
-              margin: 2mm 0;
-            }
-            .section {
-              margin-bottom: 2mm;
-            }
-            .info-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 1mm;
-              padding: 0.5mm 0;
-            }
-            .label {
-              font-size: 10px;
-              color: #000;
-              font-weight: 600;
-            }
-            .value {
-              font-size: 10px;
-              color: #000;
-              font-weight: 700;
-              text-align: right;
-            }
-            .payment-row {
-              display: flex;
-              justify-content: space-between;
-              padding: 1.5mm 0;
-              border-bottom: 1px dotted #ccc;
-            }
-            .payment-row:last-child {
-              border-bottom: none;
-            }
-            .payment-label {
-              font-size: 11px;
-              color: #000;
-              font-weight: 600;
-            }
-            .payment-amount {
-              font-size: 11px;
-              color: #000;
-              font-weight: 700;
-              text-align: right;
-            }
-            .total-box {
-              margin-top: 2mm;
-              padding: 2.5mm;
-              background: #000;
-              text-align: center;
-            }
-            .total-label {
-              font-size: 10px;
-              color: #fff;
-              font-weight: 600;
-              text-transform: uppercase;
-              margin-bottom: 1mm;
-            }
-            .total-amount {
-              font-size: 16px;
-              color: #fff;
-              font-weight: 700;
-            }
-            .footer {
-              margin-top: 2mm;
-              padding-top: 2mm;
-              border-top: 2px solid #000;
-              text-align: center;
-            }
-            .brand {
-              font-size: 13px;
-              font-weight: 700;
-              color: #000;
-            }
-            .thank-you {
-              font-size: 9px;
-              color: #000;
-              margin-top: 0.5mm;
-            }
-            @media print {
-              body {
-                background: white;
-                padding: 3mm 3mm 2mm 3mm;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              .total-box {
-                background: #000 !important;
-                color: #fff !important;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="logo">qaraa</div>
-            <div class="subtitle">Отчёт за день</div>
-          </div>
+  // 🖨️ Функция печати отчета через Print Server API
+  const printReport = async () => {
+    setShowPrintLoading(true);
+    
+    try {
+      const response = await fetch(PRINT_SERVER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'report',
+          date: new Date().toLocaleDateString('ru-RU'),
+          seller: user?.fullname || 'Продавец',
+          cashTotal: cash,
+          kaspiTotal: kaspi,
+          halykTotal: halyk,
+          mixedTotal: 0, // Смешанная теперь разбита по категориям
+          grandTotal: kaspi + halyk + cash,
+          salesCount: 0
+        })
+      });
 
-          <div class="section">
-            <div class="info-row">
-              <span class="label">Продавец:</span>
-              <span class="value">${user.fullname}</span>
-            </div>
-            <div class="info-row">
-              <span class="label">Дата:</span>
-              <span class="value">${now}</span>
-            </div>
-          </div>
-
-          <div class="divider"></div>
-
-          <div class="section">
-            <div class="payment-row">
-              <span class="payment-label">Kaspi QR</span>
-              <span class="payment-amount">${kaspi.toLocaleString()} ₸</span>
-            </div>
-            <div class="payment-row">
-              <span class="payment-label">Halyk QR | Карта</span>
-              <span class="payment-amount">${halyk.toLocaleString()} ₸</span>
-            </div>
-            <div class="payment-row">
-              <span class="payment-label">Наличные</span>
-              <span class="payment-amount">${cash.toLocaleString()} ₸</span>
-            </div>
-            ${mixed > 0 ? `
-            <div class="payment-row">
-              <span class="payment-label">Смешанная</span>
-              <span class="payment-amount">${mixed.toLocaleString()} ₸</span>
-            </div>
-            ` : ''}
-          </div>
-
-          <div class="total-box">
-            <div class="total-label">Итого касса</div>
-            <div class="total-amount">${total.toLocaleString()} ₸</div>
-          </div>
-
-          <div class="footer">
-            <div class="brand">qaraa.kz</div>
-            <div class="thank-you">Спасибо!</div>
-          </div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Отчет отправлен на печать!');
+        setShowPrintLoading(false);
+        setShowPrintSuccess(true);
+        setTimeout(() => setShowPrintSuccess(false), 2000);
+      } else {
+        console.error('❌ Ошибка печати:', result.message);
+        setShowPrintLoading(false);
+        setPrintErrorMessage('Ошибка печати отчета');
+        setShowPrintError(true);
+        setTimeout(() => setShowPrintError(false), 3000);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка отправки на печать:', error);
+      setShowPrintLoading(false);
+      setPrintErrorMessage('Не удалось отправить отчет на печать');
+      setShowPrintError(true);
+      setTimeout(() => setShowPrintError(false), 3000);
+    }
   };
 
   const openSendModal = () => {
@@ -410,6 +266,10 @@ Halyk терминал: ${halykFact || '0'} ₸
             opacity: 1;
             transform: translate(-50%, 0);
           }
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
         input[type="number"]::-webkit-inner-spin-button,
         input[type="number"]::-webkit-outer-spin-button {
@@ -1078,6 +938,138 @@ Halyk терминал: ${halykFact || '0'} ₸
           </div>
           Отчёт успешно отправлен администратору!
     </div>
+      )}
+
+      {/* iPhone-style Loading Modal */}
+      {showPrintLoading && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+        }}>
+          <div style={{
+            background: 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: '16px',
+            padding: '30px',
+            textAlign: 'center',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            minWidth: '200px',
+          }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              border: '3px solid #e5e7eb',
+              borderTop: '3px solid #007AFF',
+              borderRadius: '50%',
+              margin: '0 auto 15px',
+              animation: 'spin 1s linear infinite',
+            }}></div>
+            <div style={{ fontSize: '16px', color: '#1f2937', fontWeight: '500' }}>
+              Печать...
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* iPhone-style Success Modal */}
+      {showPrintSuccess && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+        }}>
+          <div style={{
+            background: 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: '16px',
+            padding: '30px',
+            textAlign: 'center',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            minWidth: '200px',
+          }}>
+            <div style={{
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              background: '#34C759',
+              margin: '0 auto 15px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </div>
+            <div style={{ fontSize: '16px', color: '#1f2937', fontWeight: '500' }}>
+              Успешно!
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* iPhone-style Error Modal */}
+      {showPrintError && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+        }}>
+          <div style={{
+            background: 'rgba(255,255,255,0.95)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: '16px',
+            padding: '30px',
+            textAlign: 'center',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            minWidth: '200px',
+            maxWidth: '300px',
+          }}>
+            <div style={{
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              background: '#FF3B30',
+              margin: '0 auto 15px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </div>
+            <div style={{ fontSize: '16px', color: '#1f2937', fontWeight: '500', marginBottom: '8px' }}>
+              Ошибка
+            </div>
+            <div style={{ fontSize: '14px', color: '#6b7280' }}>
+              {printErrorMessage}
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

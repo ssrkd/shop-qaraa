@@ -5,12 +5,19 @@ import kaspiLogo from '../images/kaspi.svg';
 import halykLogo from '../images/halyk.svg';
 import cashLogo from '../images/cash.png';
 
+// 🖨️ URL Print Server через Cloudflare Tunnel
+const PRINT_SERVER_URL = 'https://acoustic-organizational-fraser-sat.trycloudflare.com/api/print';
+
 export default function SalesHistory({ user }) {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedSale, setSelectedSale] = useState(null);
   const [totalAmount, setTotalAmount] = useState(0);
   const [totalQuantity, setTotalQuantity] = useState(0);
+  const [showPrintLoading, setShowPrintLoading] = useState(false);
+  const [showPrintSuccess, setShowPrintSuccess] = useState(false);
+  const [showPrintError, setShowPrintError] = useState(false);
+  const [printErrorMessage, setPrintErrorMessage] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -107,111 +114,57 @@ export default function SalesHistory({ user }) {
     return <span>{method}</span>;
   }
 
-  const printReceipt = (sale) => {
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-      <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Чек</title>
-          <style>
-            @page {
-              size: 58mm auto;
-              margin: 0;
-            }
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body {
-              width: 58mm;
-              margin: 0;
-              padding: 5mm 3mm;
-              font-family: 'Courier New', monospace;
-              font-size: 11px;
-              line-height: 1.4;
-              background: white;
-            }
-            .center { text-align: center; }
-            .bold { font-weight: 700; }
-            .line { border-top: 1px dashed #000; margin: 3mm 0; }
-            .row { 
-              display: flex;
-              justify-content: space-between;
-              margin: 2mm 0;
-            }
-            .row span:first-child {
-              font-weight: 600;
-            }
-            .row span:last-child {
-              text-align: right;
-              font-weight: 700;
-            }
-            .footer { 
-              margin-top: 5mm; 
-              text-align: center; 
-              font-size: 10px; 
-            }
-            .header {
-              font-size: 18px;
-              font-weight: 700;
-              margin-bottom: 2mm;
-            }
-            @media print {
-              body {
-                padding: 5mm 3mm;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-              }
-              html, body {
-                height: auto;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="center header">qaraa</div>
-          <div class="center" style="margin-bottom: 3mm;">Чек продажи</div>
-          <div class="line"></div>
-          <div class="row">
-            <span>Продавец:</span>
-            <span>${sale.seller_id}</span>
-          </div>
-          <div class="row">
-            <span>Товар:</span>
-            <span>${sale.product}</span>
-          </div>
-          <div class="row">
-            <span>Размер:</span>
-            <span>${sale.size}</span>
-          </div>
-          <div class="row">
-            <span>Количество:</span>
-            <span>${sale.quantity} шт</span>
-          </div>
-          <div class="row">
-            <span>Цена:</span>
-            <span>${sale.price} ₸</span>
-          </div>
-          <div class="row">
-            <span>Оплата:</span>
-            <span>${sale.payment_method}</span>
-          </div>
-          <div class="line"></div>
-          <div class="row bold" style="font-size: 13px;">
-            <span>ИТОГО:</span>
-            <span>${(parseFloat(sale.price) * sale.quantity).toFixed(2)} ₸</span>
-          </div>
-          <div class="line"></div>
-          <div class="center" style="font-size: 10px; margin-bottom: 3mm;">
-            ${new Date(sale.created_at).toLocaleString('ru-RU')}
-          </div>
-          <div class="footer">
-            <div style="font-weight: 700; margin-bottom: 2mm;">qaraa.kz</div>
-            <div>Спасибо за покупку!</div>
-          </div>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+  // 🖨️ Функция печати чека через Print Server API
+  const printReceipt = async (sale) => {
+    setShowPrintLoading(true);
+    
+    try {
+      const total = parseFloat(sale.price) * sale.quantity;
+      const change = sale.change_amount || 0;
+      const given = change > 0 ? total + change : null; // Вычисляем сколько дал клиент
+      
+      const response = await fetch(PRINT_SERVER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'receipt',
+          seller: sale.seller_id,
+          items: [{
+            productName: sale.product,
+            size: sale.size,
+            quantity: sale.quantity,
+            price: parseFloat(sale.price)
+          }],
+          total: total,
+          change: change,
+          given: given,
+          method: sale.payment_method
+        })
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        console.log('✅ Чек отправлен на печать!');
+        setShowPrintLoading(false);
+        setShowPrintSuccess(true);
+        setTimeout(() => setShowPrintSuccess(false), 2000);
+      } else {
+        console.error('❌ Ошибка печати:', result.message);
+        setShowPrintLoading(false);
+        setPrintErrorMessage('Ошибка печати чека');
+        setShowPrintError(true);
+        setTimeout(() => setShowPrintError(false), 3000);
+      }
+    } catch (error) {
+      console.error('❌ Ошибка отправки на печать:', error);
+      setShowPrintLoading(false);
+      setPrintErrorMessage('Не удалось отправить чек на печать');
+      setShowPrintError(true);
+      setTimeout(() => setShowPrintError(false), 3000);
+    }
   };
 
   if (loading) {
@@ -256,6 +209,10 @@ export default function SalesHistory({ user }) {
           @keyframes fadeIn {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
+          }
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
           }
         `}</style>
         <div style={{ 
@@ -480,6 +437,138 @@ export default function SalesHistory({ user }) {
             </div>
           </div>
         </div>
+
+        {/* iPhone-style Loading Modal */}
+        {showPrintLoading && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}>
+            <div style={{
+              background: 'rgba(255,255,255,0.95)',
+              backdropFilter: 'blur(10px)',
+              borderRadius: '16px',
+              padding: '30px',
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              minWidth: '200px',
+            }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                border: '3px solid #e5e7eb',
+                borderTop: '3px solid #007AFF',
+                borderRadius: '50%',
+                margin: '0 auto 15px',
+                animation: 'spin 1s linear infinite',
+              }}></div>
+              <div style={{ fontSize: '16px', color: '#1f2937', fontWeight: '500' }}>
+                Печать...
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* iPhone-style Success Modal */}
+        {showPrintSuccess && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}>
+            <div style={{
+              background: 'rgba(255,255,255,0.95)',
+              backdropFilter: 'blur(10px)',
+              borderRadius: '16px',
+              padding: '30px',
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              minWidth: '200px',
+            }}>
+              <div style={{
+                width: '50px',
+                height: '50px',
+                borderRadius: '50%',
+                background: '#34C759',
+                margin: '0 auto 15px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+              </div>
+              <div style={{ fontSize: '16px', color: '#1f2937', fontWeight: '500' }}>
+                Успешно!
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* iPhone-style Error Modal */}
+        {showPrintError && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+          }}>
+            <div style={{
+              background: 'rgba(255,255,255,0.95)',
+              backdropFilter: 'blur(10px)',
+              borderRadius: '16px',
+              padding: '30px',
+              textAlign: 'center',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              minWidth: '200px',
+              maxWidth: '300px',
+            }}>
+              <div style={{
+                width: '50px',
+                height: '50px',
+                borderRadius: '50%',
+                background: '#FF3B30',
+                margin: '0 auto 15px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </div>
+              <div style={{ fontSize: '16px', color: '#1f2937', fontWeight: '500', marginBottom: '8px' }}>
+                Ошибка
+              </div>
+              <div style={{ fontSize: '14px', color: '#6b7280' }}>
+                {printErrorMessage}
+              </div>
+            </div>
+          </div>
+        )}
       </>
     );
   }
@@ -492,6 +581,10 @@ export default function SalesHistory({ user }) {
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(20px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
         }
       `}</style>
       <div style={{ 
