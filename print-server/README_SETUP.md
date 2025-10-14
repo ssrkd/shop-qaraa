@@ -77,7 +77,7 @@ cloudflared tunnel --url http://localhost:3001
 ### 3. Скопируйте URL из вывода:
 
 ```
-https://recommended-heavy-vegetation-candle.trycloudflare.com
+https://alternate-mostly-expenses-joining.trycloudflare.com
 ```
 
 ### 4. Обновите URL в файлах React (если изменился):
@@ -89,7 +89,7 @@ https://recommended-heavy-vegetation-candle.trycloudflare.com
 
 Замените:
 ```javascript
-const PRINT_SERVER_URL = 'https://recommended-heavy-vegetation-candle.trycloudflare.com/api/print';
+const PRINT_SERVER_URL = 'https://alternate-mostly-expenses-joining.trycloudflare.com/api/print';
 ```
 
 ---
@@ -118,7 +118,7 @@ pkill cloudflared
 ### Из любого устройства (iPhone, Android, другой компьютер):
 
 ```bash
-curl -X POST https://recommended-heavy-vegetation-candle.trycloudflare.com/api/print \
+curl -X POST https://alternate-mostly-expenses-joining.trycloudflare.com/api/print \
   -H "Content-Type: application/json" \
   -d '{
     "type": "receipt",
