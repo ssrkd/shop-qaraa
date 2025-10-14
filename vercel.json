@@ -7,6 +7,10 @@
       "config": {
         "distDir": "build"
       }
+    },
+    {
+      "src": "api/print.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
