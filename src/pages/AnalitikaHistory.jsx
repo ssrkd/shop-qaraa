@@ -4,9 +4,10 @@ import { supabase } from "../supabaseClient";
 import kaspiLogo from '../images/kaspi.svg';
 import halykLogo from '../images/halyk.svg';
 import cashLogo from '../images/cash.png';
+import Numpad from '../components/Numpad';
 
 // 🖨️ URL Print Server через Cloudflare Tunnel
-const PRINT_SERVER_URL = 'https://acoustic-organizational-fraser-sat.trycloudflare.com/api/print';
+const PRINT_SERVER_URL = 'https://qaraa.vercel.app/api/print';
 
 export default function AnalitikaHistory({ user }) {
   const navigate = useNavigate();
@@ -24,6 +25,8 @@ export default function AnalitikaHistory({ user }) {
   const [showPrintSuccess, setShowPrintSuccess] = useState(false);
   const [showPrintError, setShowPrintError] = useState(false);
   const [printErrorMessage, setPrintErrorMessage] = useState('');
+  const [showNumpad, setShowNumpad] = useState(false);
+  const [numpadField, setNumpadField] = useState(''); // 'kaspi', 'halyk', 'cash'
 
   const BOT_TOKEN = "8458767187:AAHV6sl14LzVt1Bnk49LvoR6QYg7MAvbYhA";
   const ADMIN_ID = "996317285";
@@ -686,10 +689,14 @@ Halyk терминал: ${halykFact || '0'} ₸
                     <img src={kaspiLogo} alt="Kaspi" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   </div>
                   <input
-                    type="number"
-                    value={kaspiFact}
-                    onChange={(e) => setKaspiFact(e.target.value)}
-                    placeholder="Введите сумму"
+                    type="text"
+                    readOnly
+                    value={kaspiFact ? `${kaspiFact} ₸` : ''}
+                    onClick={() => {
+                      setNumpadField('kaspi');
+                      setShowNumpad(true);
+                    }}
+                    placeholder="Нажмите для ввода суммы"
                     style={{
                       width: '100%',
                       padding: '16px 16px 16px 56px',
@@ -698,7 +705,9 @@ Halyk терминал: ${halykFact || '0'} ₸
                       borderRadius: '14px',
                       outline: 'none',
                       transition: 'all 0.2s',
-                      fontWeight: '500'
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      background: 'white'
                     }}
                     onFocus={(e) => {
                       e.target.style.borderColor = '#ef4444';
@@ -709,13 +718,6 @@ Halyk терминал: ${halykFact || '0'} ₸
                       e.target.style.boxShadow = 'none';
                     }}
                   />
-                  <span style={{
-                    position: 'absolute',
-                    right: '16px',
-                    fontSize: '16px',
-                    color: '#6b7280',
-                    fontWeight: '600'
-                  }}>₸</span>
                 </div>
               </div>
 
@@ -751,10 +753,14 @@ Halyk терминал: ${halykFact || '0'} ₸
                     <img src={halykLogo} alt="Halyk" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   </div>
                   <input
-                    type="number"
-                    value={halykFact}
-                    onChange={(e) => setHalykFact(e.target.value)}
-                    placeholder="Введите сумму"
+                    type="text"
+                    readOnly
+                    value={halykFact ? `${halykFact} ₸` : ''}
+                    onClick={() => {
+                      setNumpadField('halyk');
+                      setShowNumpad(true);
+                    }}
+                    placeholder="Нажмите для ввода суммы"
                     style={{
                       width: '100%',
                       padding: '16px 16px 16px 56px',
@@ -763,7 +769,9 @@ Halyk терминал: ${halykFact || '0'} ₸
                       borderRadius: '14px',
                       outline: 'none',
                       transition: 'all 0.2s',
-                      fontWeight: '500'
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      background: 'white'
                     }}
                     onFocus={(e) => {
                       e.target.style.borderColor = '#10b981';
@@ -774,13 +782,6 @@ Halyk терминал: ${halykFact || '0'} ₸
                       e.target.style.boxShadow = 'none';
                     }}
                   />
-                  <span style={{
-                    position: 'absolute',
-                    right: '16px',
-                    fontSize: '16px',
-                    color: '#6b7280',
-                    fontWeight: '600'
-                  }}>₸</span>
                 </div>
               </div>
 
@@ -816,10 +817,14 @@ Halyk терминал: ${halykFact || '0'} ₸
                     <img src={cashLogo} alt="Наличные" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                   </div>
                   <input
-                    type="number"
-                    value={cashFact}
-                    onChange={(e) => setCashFact(e.target.value)}
-                    placeholder="Введите сумму"
+                    type="text"
+                    readOnly
+                    value={cashFact ? `${cashFact} ₸` : ''}
+                    onClick={() => {
+                      setNumpadField('cash');
+                      setShowNumpad(true);
+                    }}
+                    placeholder="Нажмите для ввода суммы"
                     style={{
                       width: '100%',
                       padding: '16px 16px 16px 56px',
@@ -828,7 +833,9 @@ Halyk терминал: ${halykFact || '0'} ₸
                       borderRadius: '14px',
                       outline: 'none',
                       transition: 'all 0.2s',
-                      fontWeight: '500'
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      background: 'white'
                     }}
                     onFocus={(e) => {
                       e.target.style.borderColor = '#f59e0b';
@@ -839,13 +846,6 @@ Halyk терминал: ${halykFact || '0'} ₸
                       e.target.style.boxShadow = 'none';
                     }}
                   />
-                  <span style={{
-                    position: 'absolute',
-                    right: '16px',
-                    fontSize: '16px',
-                    color: '#6b7280',
-                    fontWeight: '600'
-                  }}>₸</span>
                 </div>
               </div>
 
@@ -1070,6 +1070,27 @@ Halyk терминал: ${halykFact || '0'} ₸
             </div>
           </div>
         </div>
+      )}
+
+      {/* 🔢 Виртуальная клавиатура для сенсорных экранов */}
+      {showNumpad && (
+        <Numpad
+          value={
+            numpadField === 'kaspi' ? kaspiFact :
+            numpadField === 'halyk' ? halykFact :
+            numpadField === 'cash' ? cashFact : ''
+          }
+          onChange={(newValue) => {
+            if (numpadField === 'kaspi') {
+              setKaspiFact(newValue);
+            } else if (numpadField === 'halyk') {
+              setHalykFact(newValue);
+            } else if (numpadField === 'cash') {
+              setCashFact(newValue);
+            }
+          }}
+          onClose={() => setShowNumpad(false)}
+        />
       )}
     </>
   );

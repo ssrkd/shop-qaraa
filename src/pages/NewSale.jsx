@@ -4,9 +4,10 @@ import { supabase } from '../supabaseClient';
 import kaspiLogo from '../images/kaspi.svg';
 import halykLogo from '../images/halyk.svg';
 import cashLogo from '../images/cash.png';
+import Numpad from '../components/Numpad';
 
-// 🖨️ URL Print Server через Cloudflare Tunnel
-const PRINT_SERVER_URL = 'https://acoustic-organizational-fraser-sat.trycloudflare.com/api/print';
+// 🖨️ URL Print Server через Vercel (онлайн очередь печати)
+const PRINT_SERVER_URL = 'https://qaraa.vercel.app/api/print';
 
 export default function NewSale({ user, onBack }) {
   const navigate = useNavigate();
@@ -30,6 +31,8 @@ export default function NewSale({ user, onBack }) {
   const [showPrintSuccess, setShowPrintSuccess] = useState(false);
   const [showPrintError, setShowPrintError] = useState(false);
   const [printErrorMessage, setPrintErrorMessage] = useState('');
+  const [showNumpad, setShowNumpad] = useState(false);
+  const [numpadField, setNumpadField] = useState(''); // 'given' или 'mixed'
 
   const localDate = new Date();
   const offsetMs = localDate.getTimezoneOffset() * 60 * 1000;
@@ -1268,19 +1271,23 @@ if (updateError) throw updateError;
                       Сумма от клиента
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={givenAmount}
-                      onChange={(e) => setGivenAmount(e.target.value)}
-                      placeholder="Введите сумму"
+                      type="text"
+                      readOnly
+                      value={givenAmount ? `${givenAmount} ₸` : ''}
+                      onClick={() => {
+                        setNumpadField('given');
+                        setShowNumpad(true);
+                      }}
+                      placeholder="Нажмите для ввода суммы"
                       style={{
                         width: '100%',
                         padding: '16px',
                         border: '2px solid #e5e7eb',
                         borderRadius: '12px',
                         fontSize: '18px',
-                        fontWeight: '600'
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        background: 'white'
                       }}
                       onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
                       onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
@@ -1386,20 +1393,23 @@ if (updateError) throw updateError;
                       Сумма наличных
                     </label>
                     <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      max={totalAmount - 1}
-                      value={mixedCashAmount}
-                      onChange={(e) => setMixedCashAmount(e.target.value)}
-                      placeholder="Введите сумму наличных"
+                      type="text"
+                      readOnly
+                      value={mixedCashAmount ? `${mixedCashAmount} ₸` : ''}
+                      onClick={() => {
+                        setNumpadField('mixed');
+                        setShowNumpad(true);
+                      }}
+                      placeholder="Нажмите для ввода суммы наличных"
                       style={{
                         width: '100%',
                         padding: '16px',
                         border: '2px solid #e5e7eb',
                         borderRadius: '12px',
                         fontSize: '18px',
-                        fontWeight: '600'
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        background: 'white'
                       }}
                       onFocus={(e) => e.target.style.borderColor = '#1a1a1a'}
                       onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
@@ -1758,6 +1768,21 @@ if (updateError) throw updateError;
             </div>
           </div>
         </div>
+      )}
+
+      {/* 🔢 Виртуальная клавиатура для сенсорных экранов */}
+      {showNumpad && (
+        <Numpad
+          value={numpadField === 'given' ? givenAmount : mixedCashAmount}
+          onChange={(newValue) => {
+            if (numpadField === 'given') {
+              setGivenAmount(newValue);
+            } else if (numpadField === 'mixed') {
+              setMixedCashAmount(newValue);
+            }
+          }}
+          onClose={() => setShowNumpad(false)}
+        />
       )}
     </>
   );

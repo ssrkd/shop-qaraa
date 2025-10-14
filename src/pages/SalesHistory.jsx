@@ -5,8 +5,8 @@ import kaspiLogo from '../images/kaspi.svg';
 import halykLogo from '../images/halyk.svg';
 import cashLogo from '../images/cash.png';
 
-// 🖨️ URL Print Server через Cloudflare Tunnel
-const PRINT_SERVER_URL = 'https://acoustic-organizational-fraser-sat.trycloudflare.com/api/print';
+// 🖨️ URL Print Server через Vercel (онлайн очередь печати)
+const PRINT_SERVER_URL = 'https://qaraa.vercel.app/api/print';
 
 export default function SalesHistory({ user }) {
   const [sales, setSales] = useState([]);
